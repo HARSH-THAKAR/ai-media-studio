@@ -28,6 +28,8 @@ voice = "REPLACE_WITH_LOCAL_KOKORO_VOICE"
 speed = 1.0
 language_code = "a"
 sample_rate = 24000
+# Silence appended after each scene so speech does not butt against a cut.
+scene_tail_padding_seconds = 0.2
 # model_name is optional metadata for the generated artifact.
 
 [video]

@@ -47,7 +47,7 @@ class KokoroProvider:
         if not storyboard.is_success or not storyboard.narration.strip():
             return self._failure(started_at, "invalid_storyboard", "Storyboard has no narration.")
         try:
-            samples = self._generate_samples(storyboard.narration, voice)
+            samples, scene_durations = self._generate_scene_samples(storyboard, voice)
             destination.parent.mkdir(parents=True, exist_ok=True)
             self._audio_writer(str(destination), samples, self._settings.sample_rate)
         except ModuleNotFoundError:
@@ -66,7 +66,30 @@ class KokoroProvider:
             "kokoro",
             self._settings.model_name,
             self._settings.sample_rate,
+            scene_durations=scene_durations,
         )
+
+    def _generate_scene_samples(
+        self, storyboard: ScriptResult, voice: str | None,
+    ) -> tuple[list[float], tuple[float, ...]]:
+        """Synthesize each scene separately and measure its spoken length.
+
+        Downstream stages time the video from these measurements, so narration
+        is generated per scene rather than as one undifferentiated pass.
+        """
+        sample_rate = self._settings.sample_rate
+        padding = [0.0] * round(self._settings.scene_tail_padding_seconds * sample_rate)
+        samples: list[float] = []
+        durations: list[float] = []
+        for scene in storyboard.scenes:
+            self._logger.info("Generating narration for scene %d.", scene.order)
+            scene_samples = self._generate_samples(scene.narration, voice)
+            scene_samples.extend(padding)
+            samples.extend(scene_samples)
+            durations.append(len(scene_samples) / sample_rate)
+        if not samples:
+            raise ValueError("Kokoro returned no audio samples.")
+        return samples, tuple(durations)
 
     def _generate_samples(self, narration: str, voice: str | None) -> list[float]:
         pipeline = self._pipeline or self._pipeline_factory(self._settings.language_code)

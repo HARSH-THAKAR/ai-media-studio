@@ -136,22 +136,81 @@ class FfmpegRendererTests(unittest.TestCase):
         self.assertIn("transition=wipeleft:duration=0.5", command)
 
 
+    def test_timeline_matches_narration_despite_transition_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            scenes = (
+                Scene(1, "First.", "first", 4.0, "fade"),
+                Scene(2, "Second.", "second", 6.0, "wipeleft"),
+                Scene(3, "Third.", "third", 5.0, "cut"),
+            )
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(_workflow_result(root, scenes))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        # Scenes are held for narration plus the overlap the transition eats,
+        # so the finished timeline equals 4 + 6 + 5 seconds of narration.
+        self.assertEqual(result.duration_seconds, 15.0)
+        self.assertIn("atrim=duration=15.0", command)
+        # The first transition starts exactly when scene one stops speaking.
+        self.assertIn("offset=4.0", command)
+        self.assertIn("trim=duration=4.5", command)
+
+    def test_hard_cuts_add_no_transition_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            scenes = (
+                Scene(1, "First.", "first", 4.0, "fade"),
+                Scene(2, "Second.", "second", 6.0, "cut"),
+            )
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(_workflow_result(root, scenes))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        self.assertEqual(result.duration_seconds, 10.0)
+        self.assertIn("concat=n=2", command)
+        self.assertIn("trim=duration=4.0", command)
+
+
 def _workflow_result(root: Path, scenes: tuple[Scene, ...] | None = None) -> WorkflowResult:
-    image_one = root / "scene_001.png"
-    image_two = root / "scene_002.png"
     narration = root / "narration.wav"
-    for artifact in (image_one, image_two, narration):
-        artifact.write_bytes(b"artifact")
+    narration.write_bytes(b"artifact")
     scenes = scenes or (
         Scene(1, "First scene.", "first", 2.0, "fade"),
         Scene(2, "Second scene.", "second", 2.0, "fade"),
     )
+    images = []
+    for scene in scenes:
+        image_path = root / f"scene_{scene.order:03d}.png"
+        image_path.write_bytes(b"artifact")
+        images.append(ImageResult(scene.order, image_path, "test", 0.1, 1))
     storyboard = ScriptResult("topic", "Title", "Hook", "CTA", scenes, "test", "test", 0.1)
     voice = VoiceResult(narration, 3.5, 0.1, "test", None, 24_000)
-    images = (
-        ImageResult(1, image_one, "test", 0.1, 1),
-        ImageResult(2, image_two, "test", 0.1, 1),
-    )
+    images = tuple(images)
     request = WorkflowRequest("topic", "run-id")
     metrics = GenerationMetrics(0.3, 0.1, 0.1, 0.1)
     return WorkflowResult(request, storyboard, voice, images, (), metrics, root / "run-id")

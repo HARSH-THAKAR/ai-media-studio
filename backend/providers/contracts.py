@@ -134,6 +134,7 @@ class VoiceResult:
     model_name: str | None
     sample_rate: int
     error: ProviderError | None = None
+    scene_durations: tuple[float, ...] = ()
 
     @property
     def is_success(self) -> bool:
