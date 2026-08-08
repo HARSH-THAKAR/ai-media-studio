@@ -93,6 +93,21 @@ The command displays stage progress, total generation time, provider versions,
 and the final MP4 path. It creates one timestamped project directory beneath
 the configured output directory (or the directory passed to `--output`).
 
+## Selecting a configuration file
+
+By default the application reads `config/settings.toml` from the project
+directory. Point it somewhere else with either the `--config` option or the
+`AI_MEDIA_CONFIG` environment variable, in that order of precedence:
+
+```powershell
+ai-media-studio generate --topic "Why Japan Never Sleeps" --config "D:\studio\settings.toml"
+$env:AI_MEDIA_CONFIG = "D:\studio\settings.toml"
+```
+
+This is what an installed (non-editable) copy needs, since it has no project
+directory to read from. Relative paths inside `[paths]` still resolve against
+the project directory, so an installed copy should set absolute paths.
+
 ## Tests
 
 The suite uses only the standard library and never contacts a local model:

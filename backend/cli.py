@@ -32,6 +32,11 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     generate = commands.add_parser("generate", help="Generate a complete local video project.")
     generate.add_argument("--topic", required=True, help="Topic to turn into a video.")
+    generate.add_argument(
+        "--config",
+        type=Path,
+        help="Settings file to load instead of the project's config/settings.toml.",
+    )
     generate.add_argument("--output", type=Path, help="Directory where the project is created.")
     generate.add_argument("--style", help="Optional narrative and visual style.")
     generate.add_argument("--voice", help="Optional Kokoro voice override.")
@@ -42,7 +47,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _generate(args: argparse.Namespace) -> int:
     try:
-        settings = _settings_for_output(load_settings(), args.output)
+        settings = _settings_for_output(load_settings(args.config), args.output)
     except ConfigurationError as error:
         print(f"Configuration error: {error}")
         return 2
