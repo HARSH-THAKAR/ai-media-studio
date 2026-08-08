@@ -24,6 +24,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
     if args.command != "generate":
         parser.error("A command is required.")
+    if bool(args.topic) == bool(args.resume):
+        parser.error("Provide either --topic or --resume.")
     return _generate(args)
 
 
@@ -31,7 +33,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-media-studio")
     commands = parser.add_subparsers(dest="command", required=True)
     generate = commands.add_parser("generate", help="Generate a complete local video project.")
-    generate.add_argument("--topic", required=True, help="Topic to turn into a video.")
+    generate.add_argument("--topic", help="Topic to turn into a video.")
+    generate.add_argument(
+        "--resume",
+        type=Path,
+        help="Continue an existing project directory instead of starting a new one.",
+    )
     generate.add_argument(
         "--config",
         type=Path,
@@ -54,8 +61,13 @@ def _generate(args: argparse.Namespace) -> int:
     container = build_container(settings)
     total_steps = 2 + int(args.subtitle) + int(args.music)
     progress = _Progress(total_steps)
-    progress.advance("Generating storyboard, narration, and images")
-    workflow_result = container.get(ReelWorkflow).generate(args.topic, args.style, args.voice)
+    workflow = container.get(ReelWorkflow)
+    if args.resume:
+        progress.advance("Resuming storyboard, narration, and images")
+        workflow_result = workflow.resume(args.resume, args.voice)
+    else:
+        progress.advance("Generating storyboard, narration, and images")
+        workflow_result = workflow.generate(args.topic, args.style, args.voice)
     if not workflow_result.is_success:
         _print_failure(workflow_result.error.stage, workflow_result.error.message)
         _print_timing(workflow_result.metrics.total_duration_seconds)

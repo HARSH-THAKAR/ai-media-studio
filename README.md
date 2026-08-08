@@ -93,6 +93,20 @@ The command displays stage progress, total generation time, provider versions,
 and the final MP4 path. It creates one timestamped project directory beneath
 the configured output directory (or the directory passed to `--output`).
 
+## Resuming an interrupted run
+
+Every stage writes to the project directory, so a run interrupted after the
+storyboard can continue instead of starting over:
+
+```powershell
+ai-media-studio generate --resume "output\20260808T164700953894Z_why-japan-never-sleeps" --subtitle
+```
+
+The storyboard is read back from disk, existing narration and scene images are
+reused, and only missing artifacts are generated. Resuming a complete project
+regenerates nothing and simply re-renders. Pass either `--topic` or `--resume`,
+not both.
+
 ## Selecting a configuration file
 
 By default the application reads `config/settings.toml` from the project

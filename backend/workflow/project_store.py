@@ -9,8 +9,12 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.providers.contracts import ScriptResult
+from backend.providers.contracts import Scene, ScriptResult
 from backend.workflow.models import WorkflowResult
+
+
+class ProjectStoreError(ValueError):
+    """Raised when a persisted project cannot be read back."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,21 +41,32 @@ class ProjectStore:
     def create(self, topic: str) -> ProjectPaths:
         """Create and return a unique timestamp-and-slug project layout."""
         timestamp = datetime.now(timezone.utc)
-        project_dir = self._output_dir / _project_name(timestamp, topic)
-        paths = ProjectPaths(
-            project_dir,
-            project_dir / "manifest.json",
-            project_dir / "storyboard.json",
-            project_dir / "narration.wav",
-            project_dir / "images",
-            project_dir / "video",
-            project_dir / "logs",
-            timestamp,
-        )
+        paths = _project_paths(self._output_dir / _project_name(timestamp, topic), timestamp)
         for directory in (paths.images_dir, paths.video_dir, paths.logs_dir):
             directory.mkdir(parents=True, exist_ok=False)
         self._write_initial_manifest(paths, topic)
         return paths
+
+    def open(self, project_dir: Path) -> ProjectPaths:
+        """Return the layout of a project directory that already exists."""
+        if not project_dir.is_dir():
+            raise ProjectStoreError(f"Project directory does not exist: {project_dir}")
+        paths = _project_paths(project_dir, _recorded_timestamp(project_dir))
+        for directory in (paths.images_dir, paths.video_dir, paths.logs_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+        return paths
+
+    def load_storyboard(self, paths: ProjectPaths) -> ScriptResult:
+        """Read a persisted storyboard back into its canonical document."""
+        try:
+            data = json.loads(paths.storyboard_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ProjectStoreError(f"Unable to read storyboard: {error}") from error
+        if not isinstance(data, dict):
+            raise ProjectStoreError("Persisted storyboard must be a JSON object.")
+        if data.get("error") is not None:
+            raise ProjectStoreError("Persisted storyboard recorded a failure.")
+        return _script_result(data)
 
     def save_storyboard(self, paths: ProjectPaths, storyboard: ScriptResult) -> None:
         """Persist the canonical storyboard document as JSON."""
@@ -74,6 +89,58 @@ class ProjectStore:
                 "workflow_status": "running",
             },
         )
+
+
+def _project_paths(project_dir: Path, timestamp: datetime) -> ProjectPaths:
+    return ProjectPaths(
+        project_dir,
+        project_dir / "manifest.json",
+        project_dir / "storyboard.json",
+        project_dir / "narration.wav",
+        project_dir / "images",
+        project_dir / "video",
+        project_dir / "logs",
+        timestamp,
+    )
+
+
+def _recorded_timestamp(project_dir: Path) -> datetime:
+    """Return the project's original creation time, or now when unreadable."""
+    try:
+        manifest = json.loads((project_dir / "manifest.json").read_text(encoding="utf-8"))
+        return datetime.fromisoformat(manifest["generation_timestamp"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return datetime.now(timezone.utc)
+
+
+def _script_result(data: dict[str, object]) -> ScriptResult:
+    try:
+        scenes = tuple(_scene(value) for value in data["scenes"])
+        return ScriptResult(
+            str(data["topic"]),
+            str(data["title"]),
+            str(data["hook"]),
+            str(data["call_to_action"]),
+            scenes,
+            str(data["provider"]),
+            str(data["model"]),
+            float(data["duration_seconds"]),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ProjectStoreError(f"Persisted storyboard is invalid: {error}") from error
+
+
+def _scene(value: object) -> Scene:
+    if not isinstance(value, dict):
+        raise ProjectStoreError("Persisted scene must be a JSON object.")
+    return Scene(
+        int(value["order"]),
+        str(value["narration"]),
+        str(value["image_prompt"]),
+        float(value["duration"]),
+        str(value["transition"]),
+        str(value.get("camera_motion", "none")),
+    )
 
 
 def _project_name(timestamp: datetime, topic: str) -> str:
