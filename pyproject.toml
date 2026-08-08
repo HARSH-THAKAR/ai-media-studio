@@ -8,14 +8,16 @@ version = "0.1.0"
 description = "AI Media Studio"
 requires-python = ">=3.12"
 
+# Local narration synthesis. Every other provider talks to an external
+# process over HTTP or the command line, so it needs no Python package:
+# Ollama and ComfyUI are reached through urllib, FFmpeg through subprocess.
 dependencies = [
+    "kokoro>=0.9.4",
+    "soundfile>=0.13",
 ]
 
 [project.scripts]
 ai-media-studio = "backend.cli:main"
 
-[tool.setuptools]
-packages = ["backend"]
-
-[tool.setuptools.package-data]
-backend = ["**/*.json", "**/*.toml"]
+[tool.setuptools.packages.find]
+include = ["backend*"]

@@ -93,6 +93,14 @@ The command displays stage progress, total generation time, provider versions,
 and the final MP4 path. It creates one timestamped project directory beneath
 the configured output directory (or the directory passed to `--output`).
 
+## Tests
+
+The suite uses only the standard library and never contacts a local model:
+
+```powershell
+python -m unittest discover -s tests -t .
+```
+
 ## ComfyUI workflow setup
 
 Configure only `comfyui.workflow_path`. The image provider discovers the
