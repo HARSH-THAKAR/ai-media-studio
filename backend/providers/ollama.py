@@ -10,7 +10,43 @@ from urllib.request import Request, urlopen
 
 from backend.config import OllamaSettings
 from backend.logging_setup import get_logger
-from backend.providers.contracts import ProviderError, Scene, ScriptResult
+from backend.providers.contracts import (
+    SCENE_CAMERA_MOTIONS,
+    SCENE_TRANSITIONS,
+    ProviderError,
+    Scene,
+    ScriptResult,
+)
+
+
+DEFAULT_TRANSITION = "fade"
+DEFAULT_CAMERA_MOTION = "none"
+
+_TRANSITION_ALIASES = {
+    "cross_fade": "crossfade",
+    "cut_to": "cut",
+    "fade_in": "fade",
+    "fade_out": "fade",
+    "fade_to_black": "fade",
+    "hard_cut": "cut",
+    "slide": "wipeleft",
+    "slide_left": "wipeleft",
+    "slide_right": "wiperight",
+    "wipe": "wipeleft",
+    "wipe_down": "wipedown",
+    "wipe_left": "wipeleft",
+    "wipe_right": "wiperight",
+    "wipe_up": "wipeup",
+}
+
+_CAMERA_MOTION_ALIASES = {
+    "pan_down": "pan",
+    "pan_up": "pan",
+    "static": "none",
+    "zoom": "zoom_in",
+    "zoom_in_slow": "zoom_in",
+    "zoom_out_slow": "zoom_out",
+}
 
 
 class OllamaResponseError(ValueError):
@@ -122,13 +158,15 @@ def _request_payload(model: str, prompt: str) -> dict[str, object]:
 
 
 def _script_prompt(topic: str, style: str | None = None) -> str:
+    transitions = ", ".join(sorted(SCENE_TRANSITIONS))
+    camera_motions = ", ".join(sorted(SCENE_CAMERA_MOTIONS))
     prompt = (
         "Create a concise short-form video script for the topic below. Return only "
         "a JSON object with non-empty string fields: title, hook, call_to_action, "
         "and a scenes array. Each scene must contain order (positive integer), "
         "narration, image_prompt, duration (positive seconds), and transition. "
-        "Include camera_motion as one of: none, zoom_in, zoom_out, pan, pan_left, "
-        "or pan_right. "
+        f"Use transition as exactly one of: {transitions}. "
+        f"Include camera_motion as exactly one of: {camera_motions}. "
         "Order scenes consecutively starting at 1. Topic: "
         f"{topic}"
     )
@@ -192,8 +230,18 @@ def _parse_scene(value: object) -> Scene:
             narration=_script_field(value, "narration"),
             image_prompt=_script_field(value, "image_prompt"),
             duration=_scene_duration(value),
-            transition=_script_field(value, "transition"),
-            camera_motion=_optional_scene_field(value, "camera_motion", "none"),
+            transition=_normalized_term(
+                _optional_scene_field(value, "transition", DEFAULT_TRANSITION),
+                _TRANSITION_ALIASES,
+                SCENE_TRANSITIONS,
+                DEFAULT_TRANSITION,
+            ),
+            camera_motion=_normalized_term(
+                _optional_scene_field(value, "camera_motion", DEFAULT_CAMERA_MOTION),
+                _CAMERA_MOTION_ALIASES,
+                SCENE_CAMERA_MOTIONS,
+                DEFAULT_CAMERA_MOTION,
+            ),
         )
     except ValueError as error:
         raise OllamaResponseError(str(error)) from error
@@ -224,6 +272,23 @@ def _optional_scene_field(data: dict[object, object], key: str, default: str) ->
     if not isinstance(value, str) or not value.strip():
         raise OllamaResponseError(f"Generated scene field '{key}' must be a string.")
     return value.strip()
+
+
+def _normalized_term(
+    value: str,
+    aliases: dict[str, str],
+    allowed: frozenset[str],
+    default: str,
+) -> str:
+    """Map a free-form model term onto the canonical scene vocabulary.
+
+    Local models phrase transitions and camera motions inconsistently. Unknown
+    terms fall back to ``default`` so a cosmetic mismatch never discards an
+    otherwise valid script.
+    """
+    candidate = value.strip().lower().replace(" ", "_").replace("-", "_")
+    candidate = aliases.get(candidate, candidate)
+    return candidate if candidate in allowed else default
 
 
 def _validate_scene_order(scenes: tuple[Scene, ...]) -> None:
