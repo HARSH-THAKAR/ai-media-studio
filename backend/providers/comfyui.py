@@ -42,7 +42,17 @@ class HttpResponse(Protocol):
         """Read the complete response body."""
 
 
-HttpOpener = Callable[[Request, float], HttpResponse]
+class HttpOpener(Protocol):
+    """Callable transport compatible with ``urllib.request.urlopen``.
+
+    ``timeout`` is keyword-only because ``urlopen`` takes ``data`` as its
+    second positional parameter.
+    """
+
+    def __call__(self, request: Request, *, timeout: float) -> HttpResponse:
+        """Open a request with the supplied timeout."""
+
+
 Sleeper = Callable[[float], None]
 
 
@@ -136,7 +146,7 @@ class ComfyUIProvider:
 
     def _request_bytes(self, request: Request) -> bytes:
         try:
-            with self._opener(request, self._settings.timeout_seconds) as response:
+            with self._opener(request, timeout=self._settings.timeout_seconds) as response:
                 return response.read()
         except HTTPError as error:
             if error.code >= 500:
