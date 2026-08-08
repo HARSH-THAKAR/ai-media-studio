@@ -10,7 +10,7 @@ Topic
 LLM Provider
   |
   v
-Canonical Project Document (ScriptResult)
+Canonical Project Document (ScriptResult)          [ReelWorkflow]
   |- script metadata
   |- ordered scenes: narration, image prompt, duration, transition, camera motion
   |
@@ -24,7 +24,7 @@ Canonical Project Document (ScriptResult)
   +--> Background Music Provider --> Track
   |
   v
-Video Renderer --> Final MP4
+Video Renderer --> Final MP4                       [ProductionWorkflow]
 ```
 
 ## Provider contracts
@@ -122,10 +122,15 @@ Ollama.
 
 `ReelWorkflow` coordinates storyboard, narration, duration reconciliation, and
 scene-image generation, and persists every artifact to a timestamped project
-directory. It returns source artifacts only.
+directory. It returns source artifacts only, and can resume a project that
+already holds some of them.
 
-The CLI currently sequences the remaining stages itself, calling the subtitle,
-music, and video providers after the workflow returns. This is a known
-deviation from the rule that the workflow layer coordinates services, and it
-places pipeline sequencing in the user interface. Moving those stages into a
-workflow would restore the boundary; the providers themselves need no change.
+`ProductionWorkflow` composes `ReelWorkflow` with the subtitle, music, and
+video providers to turn one `ProductionRequest` into a finished video. Subtitle
+and music failures are recorded and reported but never abort a production,
+because a video without them is still a usable result.
+
+The command line only parses options and presents results. It builds a
+`ProductionRequest`, passes a stage reporter so progress stays a presentation
+concern, and prints whatever comes back. No pipeline sequencing lives in the
+user interface.

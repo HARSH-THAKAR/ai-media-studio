@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.providers.contracts import ImageResult, ProviderError, ScriptResult, VoiceResult
+from backend.providers.contracts import (
+    ImageResult,
+    MusicResult,
+    ProviderError,
+    ScriptResult,
+    SubtitleResult,
+    VideoResult,
+    VoiceResult,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +22,28 @@ class WorkflowRequest:
 
     topic: str
     run_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionRequest:
+    """User intent for one complete video production."""
+
+    topic: str | None = None
+    project_dir: Path | None = None
+    style: str | None = None
+    voice: str | None = None
+    subtitles: bool = False
+    music: bool = False
+
+    def __post_init__(self) -> None:
+        """Require exactly one source of scene data."""
+        if (self.topic is None) == (self.project_dir is None):
+            raise ValueError("Provide either a topic or a project directory.")
+
+    @property
+    def stage_count(self) -> int:
+        """Return how many stages this request reports as it runs."""
+        return 2 + int(self.subtitles) + int(self.music)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,3 +91,25 @@ class WorkflowResult:
     def is_success(self) -> bool:
         """Return whether every requested generation stage succeeded."""
         return self.error is None
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionResult:
+    """Everything one production produced, including the final video."""
+
+    workflow: WorkflowResult
+    subtitles: SubtitleResult | None = None
+    music: MusicResult | None = None
+    video: VideoResult | None = None
+    error: WorkflowError | None = None
+
+    @property
+    def is_success(self) -> bool:
+        """Return whether the production produced a final video."""
+        return self.error is None
+
+    @property
+    def total_duration_seconds(self) -> float:
+        """Return generation and rendering time combined."""
+        rendering = self.video.generation_time if self.video is not None else 0.0
+        return self.workflow.metrics.total_duration_seconds + rendering
