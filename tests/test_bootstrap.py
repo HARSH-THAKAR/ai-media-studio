@@ -17,6 +17,7 @@ from backend.providers.ffmpeg_renderer import FfmpegRenderer
 from backend.providers.kokoro import KokoroProvider
 from backend.providers.ollama import OllamaProvider
 from backend.providers.subtitle_provider import SrtSubtitleProvider
+from backend.workflow.production_workflow import ProductionWorkflow
 from backend.workflow.reel_workflow import ReelWorkflow
 
 
@@ -36,6 +37,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertIsInstance(container.get(BackgroundMusicProvider), LocalBackgroundMusicProvider)
         self.assertIsInstance(container.get(SubtitleProvider), SrtSubtitleProvider)
         self.assertIsInstance(container.get(ReelWorkflow), ReelWorkflow)
+        self.assertIsInstance(container.get(ProductionWorkflow), ProductionWorkflow)
 
 
 def _config() -> str:

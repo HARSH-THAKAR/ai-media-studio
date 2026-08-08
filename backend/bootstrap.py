@@ -19,6 +19,7 @@ from backend.providers.background_music import LocalBackgroundMusicProvider
 from backend.providers.kokoro import KokoroProvider
 from backend.providers.ollama import OllamaProvider
 from backend.providers.subtitle_provider import SrtSubtitleProvider
+from backend.workflow.production_workflow import ProductionWorkflow
 from backend.workflow.reel_workflow import ReelWorkflow
 
 
@@ -33,6 +34,9 @@ def build_container(settings: Settings) -> ServiceContainer[object]:
     container.register_factory(BackgroundMusicProvider, _build_background_music_provider)
     container.register_factory(SubtitleProvider, _build_subtitle_provider)
     container.register_factory(ReelWorkflow, lambda _: _build_reel_workflow(container))
+    container.register_factory(
+        ProductionWorkflow, lambda _: _build_production_workflow(container),
+    )
     return container
 
 
@@ -59,6 +63,17 @@ def _build_background_music_provider(settings: Settings) -> BackgroundMusicProvi
 def _build_subtitle_provider(settings: Settings) -> SubtitleProvider:
     del settings
     return SrtSubtitleProvider()
+
+
+def _build_production_workflow(
+    container: ServiceContainer[object],
+) -> ProductionWorkflow:
+    return ProductionWorkflow(
+        container.get(ReelWorkflow),
+        container.get(SubtitleProvider),
+        container.get(BackgroundMusicProvider),
+        container.get(VideoRenderer),
+    )
 
 
 def _build_reel_workflow(container: ServiceContainer[object]) -> ReelWorkflow:

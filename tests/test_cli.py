@@ -18,70 +18,31 @@ from backend.providers.contracts import (
     VideoResult,
     VoiceResult,
 )
-from backend.providers.contracts import BackgroundMusicProvider, SubtitleProvider, VideoRenderer
-from backend.workflow.models import GenerationMetrics, WorkflowRequest, WorkflowResult
-from backend.workflow.reel_workflow import ReelWorkflow
+from backend.workflow.models import (
+    GenerationMetrics,
+    ProductionRequest,
+    ProductionResult,
+    WorkflowError,
+    WorkflowRequest,
+    WorkflowResult,
+)
+from backend.workflow.production_workflow import ProductionWorkflow
 
 
-class _Workflow:
-    """Return a successful workflow result without contacting local models."""
+class _Production:
+    """Record the request the CLI builds and return a prepared result."""
 
-    def __init__(self, result: WorkflowResult) -> None:
+    def __init__(self, result: ProductionResult) -> None:
         self.result = result
-        self.arguments: tuple[str, str | None, str | None] | None = None
+        self.request: ProductionRequest | None = None
+        self.stages: list[str] = []
 
-    def generate(
-        self, topic: str, style: str | None = None, voice: str | None = None,
-    ) -> WorkflowResult:
-        """Record command-line options and return the prepared result."""
-        self.arguments = (topic, style, voice)
+    def produce(self, request: ProductionRequest, report=None) -> ProductionResult:
+        """Capture the request and reported stages, then return the result."""
+        self.request = request
+        if report is not None:
+            report("stage")
         return self.result
-
-
-class _Renderer:
-    """Return a fixed final MP4 result."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.arguments: tuple[SubtitleResult | None, MusicResult | None] | None = None
-
-    def render(
-        self,
-        workflow_result: WorkflowResult,
-        subtitles: SubtitleResult | None = None,
-        music: MusicResult | None = None,
-    ) -> VideoResult:
-        """Record optional artifacts and return the final video."""
-        del workflow_result
-        self.arguments = (subtitles, music)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_bytes(b"mp4")
-        return VideoResult(self.path, 2.0, 0.4, "ffmpeg")
-
-
-class _Subtitles:
-    """Provide a fixed subtitle artifact."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    def generate_subtitles(self, workflow_result: WorkflowResult) -> SubtitleResult:
-        """Return a successful subtitle artifact."""
-        del workflow_result
-        self.path.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello\n", encoding="utf-8")
-        return SubtitleResult(self.path, 2.0, 0.1, "srt")
-
-
-class _Music:
-    """Provide a fixed local music artifact."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    def select_music(self) -> MusicResult:
-        """Return one selected music file."""
-        self.path.write_bytes(b"music")
-        return MusicResult(self.path, "local_music")
 
 
 class _Container:
@@ -96,57 +57,125 @@ class _Container:
 
 
 class CommandLineTests(unittest.TestCase):
-    """Verify CLI orchestration through public provider contracts."""
+    """Verify that the CLI parses options and presents workflow results."""
 
     def test_generate_passes_options_and_reports_completed_video(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            project = Path(directory) / "project"
-            project.mkdir()
-            (project / "manifest.json").write_text(
-                json.dumps({"provider_versions": {"ollama": "test", "ffmpeg": "test"}}),
-                encoding="utf-8",
-            )
-            storyboard = ScriptResult(
-                "topic", "Title", "Hook", "CTA",
-                (Scene(1, "Narration.", "image", 2.0, "cut"),),
-                "test", "test", 0.1,
-            )
-            workflow_result = WorkflowResult(
-                WorkflowRequest("topic", "run"),
-                storyboard,
-                VoiceResult(project / "narration.wav", 2.0, 0.1, "test", None, 24_000),
-                (),
-                (),
-                GenerationMetrics(1.2, 0.1, 0.1, 1.0),
-                project,
-            )
-            workflow = _Workflow(workflow_result)
-            renderer = _Renderer(project / "video" / "final.mp4")
-            subtitles = _Subtitles(project / "subtitles.srt")
-            music = _Music(project / "track.mp3")
-            container = _Container({
-                ReelWorkflow: workflow,
-                VideoRenderer: renderer,
-                SubtitleProvider: subtitles,
-                BackgroundMusicProvider: music,
-            })
-            with patch("backend.cli.load_settings", return_value=object()), patch(
-                "backend.cli._settings_for_output", return_value=object(),
-            ) as output_settings, patch("backend.cli.build_container", return_value=container), patch(
-                "builtins.print",
-            ) as output:
-                status = main([
-                    "generate", "--topic", "topic", "--output", directory,
-                    "--style", "documentary", "--voice", "af_heart", "--music", "--subtitle",
-                ])
+            project = _project(Path(directory))
+            production = _Production(_production_result(project))
+
+            status, output = _run(production, [
+                "generate", "--topic", "topic", "--output", directory,
+                "--style", "documentary", "--voice", "af_heart", "--music", "--subtitle",
+            ])
 
         self.assertEqual(status, 0)
-        self.assertEqual(workflow.arguments, ("topic", "documentary", "af_heart"))
-        self.assertIsNotNone(renderer.arguments)
-        self.assertTrue(renderer.arguments[0].is_success)
-        self.assertTrue(renderer.arguments[1].is_success)
-        output_settings.assert_called_once()
-        self.assertTrue(any("Generation complete" in str(call) for call in output.call_args_list))
+        self.assertEqual(production.request.topic, "topic")
+        self.assertEqual(production.request.style, "documentary")
+        self.assertEqual(production.request.voice, "af_heart")
+        self.assertTrue(production.request.subtitles)
+        self.assertTrue(production.request.music)
+        self.assertIsNone(production.request.project_dir)
+        self.assertEqual(production.request.stage_count, 4)
+        self.assertTrue(any("Generation complete" in line for line in output))
+        self.assertTrue(any("final.mp4" in line for line in output))
+
+    def test_resume_supplies_a_project_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = _project(Path(directory))
+            production = _Production(_production_result(project))
+
+            status, _ = _run(production, ["generate", "--resume", str(project)])
+
+        self.assertEqual(status, 0)
+        self.assertEqual(production.request.project_dir, project)
+        self.assertIsNone(production.request.topic)
+        self.assertEqual(production.request.stage_count, 2)
+
+    def test_reports_the_failing_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = _project(Path(directory))
+            failed = ProductionResult(
+                _workflow_result(project),
+                error=WorkflowError("render", "FFmpeg failed to render the video."),
+            )
+            production = _Production(failed)
+
+            status, output = _run(production, ["generate", "--topic", "topic"])
+
+        self.assertEqual(status, 1)
+        self.assertTrue(any("failed during render" in line for line in output))
+
+    def test_warns_without_failing_when_extras_are_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = _project(Path(directory))
+            result = _production_result(
+                project,
+                subtitles=SubtitleResult(
+                    None, 0.0, 0.0, "srt", ProviderError("invalid_workflow", "No storyboard.", False),
+                ),
+                music=MusicResult(
+                    None, "local_music", ProviderError("music_unavailable", "No tracks.", False),
+                ),
+            )
+            production = _Production(result)
+
+            status, output = _run(production, ["generate", "--topic", "topic"])
+
+        self.assertEqual(status, 0)
+        self.assertTrue(any("Subtitle warning: No storyboard." in line for line in output))
+        self.assertTrue(any("Music warning: No tracks." in line for line in output))
+
+    def test_requires_exactly_one_source(self) -> None:
+        for arguments in (["generate"], ["generate", "--topic", "t", "--resume", "d"]):
+            with self.subTest(arguments=arguments), self.assertRaises(SystemExit):
+                main(arguments)
+
+
+def _run(production: _Production, arguments: list[str]) -> tuple[int, list[str]]:
+    container = _Container({ProductionWorkflow: production})
+    printed: list[str] = []
+    with patch("backend.cli.load_settings", return_value=object()), patch(
+        "backend.cli._settings_for_output", return_value=object(),
+    ), patch("backend.cli.build_container", return_value=container), patch(
+        "builtins.print", side_effect=lambda *args: printed.append(" ".join(str(a) for a in args)),
+    ):
+        status = main(arguments)
+    return status, printed
+
+
+def _project(root: Path) -> Path:
+    project = root / "project"
+    project.mkdir(exist_ok=True)
+    (project / "manifest.json").write_text(
+        json.dumps({"provider_versions": {"ollama": "test"}}), encoding="utf-8",
+    )
+    return project
+
+
+def _workflow_result(project: Path) -> WorkflowResult:
+    storyboard = ScriptResult(
+        "topic", "Title", "Hook", "CTA",
+        (Scene(1, "Narration.", "image", 2.0, "cut"),), "test", "test", 0.1,
+    )
+    return WorkflowResult(
+        WorkflowRequest("topic", "run"),
+        storyboard,
+        VoiceResult(project / "narration.wav", 2.0, 0.1, "test", None, 24_000),
+        (),
+        (),
+        GenerationMetrics(1.2, 0.1, 0.1, 1.0),
+        project,
+    )
+
+
+def _production_result(
+    project: Path,
+    subtitles: SubtitleResult | None = None,
+    music: MusicResult | None = None,
+) -> ProductionResult:
+    video = VideoResult(project / "video" / "final.mp4", 2.0, 0.4, "ffmpeg")
+    return ProductionResult(_workflow_result(project), subtitles, music, video)
 
 
 if __name__ == "__main__":

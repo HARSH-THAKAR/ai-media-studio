@@ -10,12 +10,8 @@ from typing import Sequence
 
 from backend.bootstrap import build_container
 from backend.config import ConfigurationError, Settings, load_settings
-from backend.providers.contracts import (
-    BackgroundMusicProvider,
-    SubtitleProvider,
-    VideoRenderer,
-)
-from backend.workflow.reel_workflow import ReelWorkflow
+from backend.workflow.models import ProductionRequest, ProductionResult
+from backend.workflow.production_workflow import ProductionWorkflow
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -58,39 +54,23 @@ def _generate(args: argparse.Namespace) -> int:
     except ConfigurationError as error:
         print(f"Configuration error: {error}")
         return 2
+    request = ProductionRequest(
+        topic=args.topic,
+        project_dir=args.resume,
+        style=args.style,
+        voice=args.voice,
+        subtitles=args.subtitle,
+        music=args.music,
+    )
     container = build_container(settings)
-    total_steps = 2 + int(args.subtitle) + int(args.music)
-    progress = _Progress(total_steps)
-    workflow = container.get(ReelWorkflow)
-    if args.resume:
-        progress.advance("Resuming storyboard, narration, and images")
-        workflow_result = workflow.resume(args.resume, args.voice)
-    else:
-        progress.advance("Generating storyboard, narration, and images")
-        workflow_result = workflow.generate(args.topic, args.style, args.voice)
-    if not workflow_result.is_success:
-        _print_failure(workflow_result.error.stage, workflow_result.error.message)
-        _print_timing(workflow_result.metrics.total_duration_seconds)
+    progress = _Progress(request.stage_count)
+    result = container.get(ProductionWorkflow).produce(request, progress.advance)
+    _print_warnings(result)
+    if not result.is_success:
+        _print_failure(result.error.stage, result.error.message)
+        _print_timing(result.total_duration_seconds)
         return 1
-    subtitles = None
-    if args.subtitle:
-        progress.advance("Generating subtitles")
-        subtitles = container.get(SubtitleProvider).generate_subtitles(workflow_result)
-        if not subtitles.is_success:
-            print(f"Subtitle warning: {subtitles.error.message}")
-    music = None
-    if args.music:
-        progress.advance("Selecting background music")
-        music = container.get(BackgroundMusicProvider).select_music()
-        if not music.is_success:
-            print(f"Music warning: {music.error.message}")
-    progress.advance("Rendering final MP4")
-    video = container.get(VideoRenderer).render(workflow_result, subtitles, music)
-    if not video.is_success:
-        _print_failure(video.error.code, video.error.message)
-        _print_timing(workflow_result.metrics.total_duration_seconds + video.generation_time)
-        return 1
-    _print_summary(workflow_result.project_path, video.artifact_path, workflow_result, video)
+    _print_summary(result)
     return 0
 
 
@@ -105,11 +85,18 @@ def _print_failure(stage: str, message: str) -> None:
     print(f"Generation failed during {stage}: {message}")
 
 
-def _print_summary(project_path: Path, video_path: Path, workflow, video) -> None:
+def _print_warnings(result: ProductionResult) -> None:
+    if result.subtitles is not None and not result.subtitles.is_success:
+        print(f"Subtitle warning: {result.subtitles.error.message}")
+    if result.music is not None and not result.music.is_success:
+        print(f"Music warning: {result.music.error.message}")
+
+
+def _print_summary(result: ProductionResult) -> None:
     print("\nGeneration complete")
-    _print_timing(workflow.metrics.total_duration_seconds + video.generation_time)
-    _print_provider_versions(project_path)
-    print(f"Final output: {video_path}")
+    _print_timing(result.total_duration_seconds)
+    _print_provider_versions(result.workflow.project_path)
+    print(f"Final output: {result.video.artifact_path}")
 
 
 def _print_timing(seconds: float) -> None:

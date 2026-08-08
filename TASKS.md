@@ -75,7 +75,5 @@ narrated, subtitled MP4 entirely on local infrastructure.
 
   Scenes are queued to ComfyUI one prompt at a time.
 
-- [ ] Report the failing stage rather than the error code in CLI output
-
 - [ ] Decide where relative `[paths]` values resolve from for an installed
       copy, which currently must use absolute paths
