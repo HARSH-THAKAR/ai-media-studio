@@ -1,59 +1,84 @@
 # Current Sprint
 
+Phase 1 and Phase 2 of the roadmap are complete: a topic produces a finished,
+narrated, subtitled MP4 entirely on local infrastructure.
+
 ## Backend
 
-- [ ] Configuration System
+- [x] Configuration System
 
-- [ ] Logging
+- [x] Logging
 
-- [ ] CLI
+- [x] CLI
 
 ---
 
 ## LLM
 
-- [ ] Generate Script
+- [x] Generate Script
 
-- [ ] Generate Hook
+- [x] Generate Hook
 
-- [ ] Generate CTA
+- [x] Generate CTA
 
-- [ ] Generate Title
+- [x] Generate Title
 
-- [ ] Generate canonical scene document
+- [x] Generate canonical scene document
 
-- [ ] Generate scene image prompts
+- [x] Generate scene image prompts
 
 ---
 
 ## Image Service
 
-- [ ] ComfyUI API
+- [x] ComfyUI API
 
 - [ ] Batch Generation
 
-- [ ] Retry Logic
+- [x] Retry Logic
 
 ---
 
 ## Voice Service
 
-- [ ] Kokoro Wrapper
+- [x] Kokoro Wrapper
 
-- [ ] Voice Selection
+- [x] Voice Selection
 
-- [ ] Speed Control
+- [x] Speed Control
+
+- [x] Per-scene narration measurement
 
 ---
 
 ## Video Service
 
-- [ ] FFmpeg Wrapper
+- [x] FFmpeg Wrapper
 
-- [ ] Transitions
+- [x] Transitions
 
-- [ ] Ken Burns
+- [x] Ken Burns
 
-- [ ] Music
+- [x] Music
 
-- [ ] Export
+- [x] Subtitles
+
+- [x] Export
+
+---
+
+## Next
+
+- [ ] Resume a run from its persisted project directory
+
+  A failure in the image stage discards a finished storyboard and narration
+  that are already written to disk.
+
+- [ ] Batch Generation
+
+  Scenes are queued to ComfyUI one prompt at a time.
+
+- [ ] Report the failing stage rather than the error code in CLI output
+
+- [ ] Decide where relative `[paths]` values resolve from for an installed
+      copy, which currently must use absolute paths
