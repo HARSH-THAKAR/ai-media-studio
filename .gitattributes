@@ -1,0 +1,12 @@
+# Let Git normalize line endings for text, but never touch binary artifacts.
+# Without this, core.autocrlf rewrites LF to CRLF inside binary files on
+# checkout and corrupts them.
+* text=auto
+
+*.pdf binary
+*.png binary
+*.jpg binary
+*.wav binary
+*.mp3 binary
+*.mp4 binary
+*.ico binary
