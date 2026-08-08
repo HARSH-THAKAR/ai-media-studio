@@ -1,0 +1,1 @@
+An open-source, fully local AI media production studio where a single topic is transformed into a professionally edited, narrated, subtitled video ready for publication across multiple platforms, without relying on paid APIs or cloud services.

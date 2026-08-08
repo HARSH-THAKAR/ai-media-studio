@@ -1,0 +1,65 @@
+# Copy this file to config/settings.toml and select locally installed models.
+
+config_version = 1
+debug = false
+
+[paths]
+assets_dir = "assets"
+output_dir = "output"
+temp_dir = "temp"
+ffmpeg_executable = "ffmpeg"
+
+[ollama]
+base_url = "http://127.0.0.1:11434"
+model = "REPLACE_WITH_LOCAL_OLLAMA_MODEL"
+timeout_seconds = 60
+
+[comfyui]
+base_url = "http://127.0.0.1:8188"
+workflow_path = "config/comfyui_workflow.json"
+# The provider discovers the positive prompt and Save Image nodes automatically.
+timeout_seconds = 120
+poll_interval_seconds = 1.0
+max_retries = 2
+retry_delay_seconds = 1.0
+
+[kokoro]
+voice = "REPLACE_WITH_LOCAL_KOKORO_VOICE"
+speed = 1.0
+language_code = "a"
+sample_rate = 24000
+# model_name is optional metadata for the generated artifact.
+
+[video]
+width = 1080
+height = 1920
+frames_per_second = 30
+render_timeout_seconds = 300
+transition_duration_seconds = 0.5
+
+[logging]
+level = "INFO"
+console_enabled = true
+file_enabled = true
+directory = "logs"
+filename = "ai_media_studio.log"
+max_bytes = 5000000
+backup_count = 3
+
+[cache]
+enabled = true
+directory = "cache"
+max_size_mb = 1024
+
+[music]
+directory = "music"
+volume = 0.15
+fade_duration_seconds = 1.0
+ducking_ratio = 6.0
+
+[temp]
+max_age_hours = 24
+
+[gpu]
+device = "auto"
+# Omit memory_limit_mb to let the selected backend manage available memory.

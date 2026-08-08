@@ -1,0 +1,334 @@
+"""FFmpeg implementation of the local video renderer contract."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from time import perf_counter
+
+from backend.config import MusicSettings, PathSettings, VideoSettings
+from backend.logging_setup import get_logger
+from backend.providers.contracts import MusicResult, ProviderError, Scene, SubtitleResult, VideoResult
+from backend.workflow.models import WorkflowResult
+
+
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+class FfmpegRenderer:
+    """Assemble workflow images and narration into one deterministic MP4."""
+
+    def __init__(
+        self,
+        paths: PathSettings,
+        settings: VideoSettings,
+        music_settings: MusicSettings,
+        command_runner: CommandRunner | None = None,
+    ) -> None:
+        """Initialize the renderer with configured output and FFmpeg settings."""
+        self._paths = paths
+        self._settings = settings
+        self._music_settings = music_settings
+        self._command_runner = command_runner or subprocess.run
+        self._logger = get_logger("providers.ffmpeg")
+
+    def render(
+        self,
+        workflow_result: WorkflowResult,
+        subtitles: SubtitleResult | None = None,
+        music: MusicResult | None = None,
+    ) -> VideoResult:
+        """Render completed workflow assets to a H.264 MP4 without AI calls."""
+        started_at = perf_counter()
+        self._logger.info("Starting video render.")
+        try:
+            images, narration, scenes = _render_inputs(workflow_result)
+            executable = _resolve_executable(self._paths.ffmpeg_executable)
+            output_path = _output_path(self._paths, workflow_result)
+            subtitle_path = _subtitle_path(subtitles)
+            music_path = _music_path(music)
+            command, duration = _render_command(
+                executable,
+                images,
+                narration,
+                scenes,
+                output_path,
+                self._settings,
+                subtitle_path,
+                music_path,
+                self._music_settings,
+            )
+            self._logger.info("Rendering %d scenes.", len(images))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            self._command_runner(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self._settings.render_timeout_seconds,
+            )
+        except FileNotFoundError:
+            return self._failure(started_at, "ffmpeg_unavailable", "FFmpeg is unavailable.")
+        except subprocess.TimeoutExpired:
+            return self._failure(started_at, "render_timeout", "FFmpeg rendering timed out.")
+        except subprocess.CalledProcessError as error:
+            message = error.stderr.strip() or "FFmpeg failed to render the video."
+            return self._failure(started_at, "render_failed", message)
+        except (ValueError, OSError) as error:
+            return self._failure(started_at, "invalid_workflow", str(error))
+        except Exception as error:
+            return self._failure(started_at, "renderer_error", str(error))
+        generation_time = perf_counter() - started_at
+        self._logger.info("Finished video render in %.2f seconds.", generation_time)
+        return VideoResult(output_path, duration, generation_time, "ffmpeg")
+
+    def _failure(
+        self, started_at: float, code: str, message: str,
+    ) -> VideoResult:
+        generation_time = perf_counter() - started_at
+        self._logger.warning("Video render failed (%s): %s", code, message)
+        return VideoResult(
+            None,
+            0.0,
+            generation_time,
+            "ffmpeg",
+            ProviderError(code, message, code in {"ffmpeg_unavailable", "render_timeout"}),
+        )
+
+
+def _render_inputs(
+    workflow_result: WorkflowResult,
+) -> tuple[tuple[Path, ...], Path, tuple[Scene, ...]]:
+    if not workflow_result.is_success or workflow_result.storyboard is None:
+        raise ValueError("Workflow result must contain a successful storyboard.")
+    voice_result = workflow_result.voice_result
+    if voice_result is None or not voice_result.is_success or voice_result.artifact_path is None:
+        raise ValueError("Workflow result must contain successful narration audio.")
+    if not voice_result.artifact_path.is_file():
+        raise ValueError("Narration artifact does not exist.")
+    images = _ordered_images(workflow_result)
+    return images, voice_result.artifact_path, workflow_result.storyboard.scenes
+
+
+def _ordered_images(workflow_result: WorkflowResult) -> tuple[Path, ...]:
+    storyboard = workflow_result.storyboard
+    assert storyboard is not None
+    by_scene = {result.scene_order: result for result in workflow_result.image_results}
+    paths: list[Path] = []
+    for scene in storyboard.scenes:
+        result = by_scene.get(scene.order)
+        if result is None or not result.is_success or result.artifact_path is None:
+            raise ValueError(f"Scene {scene.order} has no successful image artifact.")
+        if not result.artifact_path.is_file():
+            raise ValueError(f"Image artifact for scene {scene.order} does not exist.")
+        paths.append(result.artifact_path)
+    return tuple(paths)
+
+
+def _resolve_executable(configured_executable: str) -> str:
+    configured_path = Path(configured_executable)
+    if configured_path.is_file():
+        return str(configured_path)
+    executable = shutil.which(configured_executable)
+    if executable is None:
+        raise FileNotFoundError(configured_executable)
+    return executable
+
+
+def _output_path(paths: PathSettings, workflow_result: WorkflowResult) -> Path:
+    if workflow_result.project_path:
+        return workflow_result.project_path / "video" / "final.mp4"
+    return paths.output_dir / workflow_result.request.run_id / "final.mp4"
+
+
+def _render_command(
+    executable: str,
+    images: tuple[Path, ...],
+    narration: Path,
+    scenes: tuple[Scene, ...],
+    output_path: Path,
+    settings: VideoSettings,
+    subtitle_path: Path | None,
+    music_path: Path | None,
+    music_settings: MusicSettings,
+) -> tuple[list[str], float]:
+    command = [executable, "-y"]
+    for image, scene in zip(images, scenes, strict=True):
+        command.extend(
+            ["-framerate", str(settings.frames_per_second), "-loop", "1", "-t", str(scene.duration), "-i", str(image)],
+        )
+    command.extend(["-i", str(narration)])
+    if music_path is not None:
+        command.extend(["-stream_loop", "-1", "-i", str(music_path)])
+    filter_graph, output_duration = _filter_graph(
+        scenes, settings, subtitle_path, music_path is not None, music_settings,
+    )
+    command.extend(
+        [
+            "-filter_complex",
+            filter_graph,
+            "-map",
+            "[video]",
+            "-map",
+            "[audio]",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ],
+    )
+    return command, output_duration
+
+
+def _filter_graph(
+    scenes: tuple[Scene, ...],
+    settings: VideoSettings,
+    subtitle_path: Path | None,
+    has_music: bool,
+    music_settings: MusicSettings,
+) -> tuple[str, float]:
+    video_filters = [_scene_filter(index, scene, settings) for index, scene in enumerate(scenes)]
+    concat_filters, output_label, output_duration = _transition_filters(scenes, settings)
+    audio = _audio_filter(len(scenes), output_duration, has_music, music_settings)
+    video = _video_output_filter(output_label, subtitle_path)
+    return ";".join(video_filters + concat_filters + [video, audio]), output_duration
+
+
+def _subtitle_path(subtitles: SubtitleResult | None) -> Path | None:
+    if subtitles is None or not subtitles.is_success or subtitles.artifact_path is None:
+        return None
+    if not subtitles.artifact_path.is_file():
+        return None
+    return subtitles.artifact_path
+
+
+def _music_path(music: MusicResult | None) -> Path | None:
+    if music is None or not music.is_success or music.artifact_path is None:
+        return None
+    if not music.artifact_path.is_file():
+        return None
+    return music.artifact_path
+
+
+def _audio_filter(
+    narration_index: int,
+    output_duration: float,
+    has_music: bool,
+    music_settings: MusicSettings,
+) -> str:
+    narration = f"[{narration_index}:a]apad,atrim=duration={output_duration}[narration]"
+    if not has_music:
+        return narration.replace("[narration]", "[audio]")
+    fade_duration = min(music_settings.fade_duration_seconds, output_duration / 2)
+    fade_out_start = output_duration - fade_duration
+    music_index = narration_index + 1
+    background = (
+        f"[{music_index}:a]volume={music_settings.volume},"
+        f"afade=t=in:st=0:d={fade_duration},"
+        f"afade=t=out:st={fade_out_start}:d={fade_duration},"
+        f"atrim=duration={output_duration}[background]"
+    )
+    ducked = (
+        f"[background][narration]sidechaincompress=threshold=0.02:"
+        f"ratio={music_settings.ducking_ratio}:attack=20:release=250[ducked]"
+    )
+    return ";".join([narration, background, ducked, "[ducked][narration]amix=inputs=2:duration=first[audio]"])
+
+
+def _video_output_filter(output_label: str, subtitle_path: Path | None) -> str:
+    if subtitle_path is None:
+        return f"[{output_label}]format=yuv420p[video]"
+    escaped_path = _escape_filter_path(subtitle_path)
+    return f"[{output_label}]format=yuv420p,subtitles=filename='{escaped_path}':charenc=UTF-8[video]"
+
+
+def _escape_filter_path(path: Path) -> str:
+    return str(path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
+def _scene_filter(index: int, scene: Scene, settings: VideoSettings) -> str:
+    motion = _motion_filter(scene, settings)
+    return (
+        f"[{index}:v]scale={settings.width}:{settings.height}:"
+        "force_original_aspect_ratio=increase,"
+        f"crop={settings.width}:{settings.height}{motion},setsar=1,"
+        f"trim=duration={scene.duration},setpts=PTS-STARTPTS[v{index}]"
+    )
+
+
+def _motion_filter(scene: Scene, settings: VideoSettings) -> str:
+    frames = max(1, round(scene.duration * settings.frames_per_second))
+    if scene.camera_motion == "none":
+        return f",fps={settings.frames_per_second}"
+    if scene.camera_motion == "zoom_in":
+        zoom = f"min(1+on*0.15/{frames},1.15)"
+        return _zoompan_filter(zoom, "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)", settings)
+    if scene.camera_motion == "zoom_out":
+        zoom = f"max(1.15-on*0.15/{frames},1.0)"
+        return _zoompan_filter(zoom, "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)", settings)
+    if scene.camera_motion in {"pan", "pan_right"}:
+        return _zoompan_filter("1.1", f"(iw-iw/zoom)*on/{frames}", "ih/2-(ih/zoom/2)", settings)
+    if scene.camera_motion == "pan_left":
+        return _zoompan_filter("1.1", f"(iw-iw/zoom)*(1-on/{frames})", "ih/2-(ih/zoom/2)", settings)
+    raise ValueError(f"Unsupported scene camera motion: {scene.camera_motion}")
+
+
+def _zoompan_filter(zoom: str, x: str, y: str, settings: VideoSettings) -> str:
+    return (
+        f",zoompan=z='{zoom}':x='{x}':y='{y}':d=1:"
+        f"s={settings.width}x{settings.height}:fps={settings.frames_per_second}"
+    )
+
+
+def _transition_filters(
+    scenes: tuple[Scene, ...], settings: VideoSettings,
+) -> tuple[list[str], str, float]:
+    if len(scenes) == 1:
+        return [], "v0", scenes[0].duration
+    filters: list[str] = []
+    label = "v0"
+    elapsed = scenes[0].duration
+    for index, scene in enumerate(scenes[1:], start=1):
+        output_label = f"xf{index}"
+        transition = _transition_name(scene.transition)
+        if transition is None:
+            filters.append(f"[{label}][v{index}]concat=n=2:v=1:a=0[{output_label}]")
+            elapsed += scene.duration
+        else:
+            duration = min(
+                settings.transition_duration_seconds,
+                scenes[index - 1].duration / 2,
+                scene.duration / 2,
+            )
+            filters.append(
+                f"[{label}][v{index}]xfade=transition={transition}:duration={duration}:"
+                f"offset={elapsed - duration}[{output_label}]"
+            )
+            elapsed += scene.duration - duration
+        label = output_label
+    return filters, label, elapsed
+
+
+def _transition_name(value: str) -> str | None:
+    transitions = {
+        "crossfade": "fade",
+        "dissolve": "dissolve",
+        "fade": "fade",
+        "none": None,
+        "cut": None,
+        "wipeleft": "wipeleft",
+        "wiperight": "wiperight",
+        "wipeup": "wipeup",
+        "wipedown": "wipedown",
+    }
+    try:
+        return transitions[value]
+    except KeyError as error:
+        raise ValueError(f"Unsupported scene transition: {value}") from error

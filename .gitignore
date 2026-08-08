@@ -1,0 +1,32 @@
+# Local machine configuration
+config/settings.toml
+
+# Generated artifacts
+output/
+temp/
+cache/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Vendored third-party runtimes and model weights (installed locally, not source)
+comfyui/
+model/
+voice/
+ffmpeg-*/
+
+# Stray nested repository
+AI-Media-Studio/
+
+# Local tool settings
+.claude/settings.local.json
+
+# Local media assets
+assets/*
+!assets/.gitkeep
+music/*
+!music/.gitkeep
