@@ -254,12 +254,17 @@ def _escape_filter_path(path: Path) -> str:
 
 
 def _scene_filter(index: int, scene: Scene, settings: VideoSettings) -> str:
+    """Build the per-scene video filter chain.
+
+    ``settb=AVTB`` normalizes every scene onto the microsecond timebase that
+    ``xfade`` emits, so chained transitions keep matching input timebases.
+    """
     motion = _motion_filter(scene, settings)
     return (
         f"[{index}:v]scale={settings.width}:{settings.height}:"
         "force_original_aspect_ratio=increase,"
         f"crop={settings.width}:{settings.height}{motion},setsar=1,"
-        f"trim=duration={scene.duration},setpts=PTS-STARTPTS[v{index}]"
+        f"trim=duration={scene.duration},setpts=PTS-STARTPTS,settb=AVTB[v{index}]"
     )
 
 
