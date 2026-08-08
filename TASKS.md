@@ -11,6 +11,8 @@ narrated, subtitled MP4 entirely on local infrastructure.
 
 - [x] CLI
 
+- [x] Resume a run from its persisted project directory
+
 ---
 
 ## LLM
@@ -68,11 +70,6 @@ narrated, subtitled MP4 entirely on local infrastructure.
 ---
 
 ## Next
-
-- [ ] Resume a run from its persisted project directory
-
-  A failure in the image stage discards a finished storyboard and narration
-  that are already written to disk.
 
 - [ ] Batch Generation
 

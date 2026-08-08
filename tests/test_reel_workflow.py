@@ -60,9 +60,11 @@ class FakeImageProvider:
     def __init__(self, fail_order: int | None = None) -> None:
         """Optionally configure a scene that returns a provider failure."""
         self._fail_order = fail_order
+        self.generated: list[int] = []
 
     def generate_image(self, scene: Scene, output_path: Path) -> ImageResult:
         """Write an image or return the configured failure."""
+        self.generated.append(scene.order)
         if scene.order == self._fail_order:
             return ImageResult(
                 scene.order, None, "test", 0.1, 1,
@@ -71,6 +73,27 @@ class FakeImageProvider:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"image")
         return ImageResult(scene.order, output_path, "test", 0.1, 1)
+
+
+class _UnusableLlmProvider:
+    """Fail if a resumed run asks for a storyboard it already has."""
+
+    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
+        """Raise because the persisted storyboard should be reused."""
+        raise AssertionError("Resume regenerated the storyboard.")
+
+
+class _UnusableVoiceProvider:
+    """Fail if a resumed run asks for narration it already has."""
+
+    def generate_voice(
+        self,
+        storyboard: ScriptResult,
+        output_path: Path | None = None,
+        voice: str | None = None,
+    ) -> VoiceResult:
+        """Raise because the persisted narration should be reused."""
+        raise AssertionError("Resume regenerated the narration.")
 
 
 class ReelWorkflowTests(unittest.TestCase):
@@ -143,6 +166,37 @@ class ReelWorkflowTests(unittest.TestCase):
             result = workflow.generate("Why Japan Never Sleeps")
 
         self.assertEqual([scene.duration for scene in result.storyboard.scenes], [2.0, 2.0])
+
+    def test_resume_regenerates_only_the_missing_images(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            failing = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider((3.0, 4.0)), FakeImageProvider(2), output_dir,
+            )
+            first = failing.generate("Why Japan Never Sleeps")
+            self.assertFalse(first.is_success)
+
+            images = FakeImageProvider()
+            resumed = ReelWorkflow(
+                _UnusableLlmProvider(), _UnusableVoiceProvider(), images, output_dir,
+            ).resume(first.project_path)
+
+        self.assertTrue(resumed.is_success)
+        # Scene one already had an image, so only scene two was generated again.
+        self.assertEqual(images.generated, [2])
+        self.assertEqual([scene.duration for scene in resumed.storyboard.scenes], [3.0, 4.0])
+        self.assertEqual(len(resumed.image_results), 2)
+
+    def test_resume_reports_a_missing_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider(), FakeImageProvider(), Path(directory),
+            )
+
+            result = workflow.resume(Path(directory) / "absent")
+
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.error.stage, "persistence")
 
     def test_returns_partial_results_when_an_image_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

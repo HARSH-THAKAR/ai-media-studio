@@ -24,7 +24,7 @@ from backend.workflow.models import (
     WorkflowRequest,
     WorkflowResult,
 )
-from backend.workflow.project_store import ProjectPaths, ProjectStore
+from backend.workflow.project_store import ProjectPaths, ProjectStore, ProjectStoreError
 
 
 MINIMUM_SCENE_DURATION_SECONDS = 1.0
@@ -64,6 +64,44 @@ class ReelWorkflow:
         if isinstance(voice_result, WorkflowResult):
             return voice_result
         storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
+        return self._generate_remaining(request, project, started_at, storyboard, voice_result)
+
+    def resume(self, project_dir: Path, voice: str | None = None) -> WorkflowResult:
+        """Continue a persisted project from its first incomplete stage.
+
+        Every stage writes its artifacts to the project directory, so a run
+        interrupted after the storyboard can reuse the narration and images it
+        already produced instead of regenerating them.
+        """
+        started_at = perf_counter()
+        try:
+            project = self._project_store.open(project_dir)
+            storyboard = self._project_store.load_storyboard(project)
+        except (OSError, ProjectStoreError) as error:
+            return _persistence_failure(
+                WorkflowRequest("", project_dir.name), started_at, str(error),
+            )
+        request = WorkflowRequest(storyboard.topic, project.project_dir.name)
+        self._logger.info("Resuming reel workflow for topic '%s'.", request.topic)
+        voice_result = _existing_narration(project, storyboard)
+        if voice_result is None:
+            generated = self._generate_voice(request, started_at, project, storyboard, voice)
+            if isinstance(generated, WorkflowResult):
+                return generated
+            voice_result = generated
+            storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
+        else:
+            self._logger.info("Reusing existing narration.")
+        return self._generate_remaining(request, project, started_at, storyboard, voice_result)
+
+    def _generate_remaining(
+        self,
+        request: WorkflowRequest,
+        project: ProjectPaths,
+        started_at: float,
+        storyboard: ScriptResult,
+        voice_result: VoiceResult,
+    ) -> WorkflowResult:
         assets = [GeneratedAsset("narration", voice_result.artifact_path)]
         image_results = self._generate_images(request, project, storyboard, assets)
         failure = next((item for item in image_results if not item.is_success), None)
@@ -172,11 +210,15 @@ class ReelWorkflow:
     ) -> tuple[ImageResult, ...]:
         results: list[ImageResult] = []
         for scene in storyboard.scenes:
+            image_path = project.images_dir / f"scene_{scene.order:03d}.png"
+            if _is_present(image_path):
+                self._logger.info("Reusing existing image for scene %d.", scene.order)
+                results.append(ImageResult(scene.order, image_path, "reused", 0.0, 0))
+                assets.append(GeneratedAsset("image", image_path, scene.order))
+                continue
             self._logger.info("Generating image for scene %d.", scene.order)
             try:
-                result = self._image_provider.generate_image(
-                    scene, project.images_dir / f"scene_{scene.order:03d}.png",
-                )
+                result = self._image_provider.generate_image(scene, image_path)
             except Exception as error:
                 self._logger.exception("Image provider raised for scene %d.", scene.order)
                 result = ImageResult(
@@ -264,6 +306,36 @@ def _persistence_failure(
         GenerationMetrics(perf_counter() - started_at, 0.0, 0.0, 0.0),
         Path(),
         error,
+    )
+
+
+def _is_present(artifact_path: Path) -> bool:
+    """Return whether an artifact exists and holds content."""
+    try:
+        return artifact_path.is_file() and artifact_path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _existing_narration(
+    project: ProjectPaths, storyboard: ScriptResult,
+) -> VoiceResult | None:
+    """Describe already-generated narration, or nothing when it is absent.
+
+    A persisted storyboard is only written back with reconciled durations once
+    narration exists, so its scene durations are the measured ones.
+    """
+    if not _is_present(project.narration_path):
+        return None
+    scene_durations = tuple(scene.duration for scene in storyboard.scenes)
+    return VoiceResult(
+        project.narration_path,
+        sum(scene_durations),
+        0.0,
+        "reused",
+        None,
+        0,
+        scene_durations=scene_durations,
     )
 
 
