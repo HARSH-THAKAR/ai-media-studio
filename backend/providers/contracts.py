@@ -10,6 +10,28 @@ if TYPE_CHECKING:
     from backend.workflow.models import WorkflowResult
 
 
+SCENE_TRANSITIONS: frozenset[str] = frozenset({
+    "crossfade",
+    "cut",
+    "dissolve",
+    "fade",
+    "none",
+    "wipedown",
+    "wipeleft",
+    "wiperight",
+    "wipeup",
+})
+
+SCENE_CAMERA_MOTIONS: frozenset[str] = frozenset({
+    "none",
+    "pan",
+    "pan_left",
+    "pan_right",
+    "zoom_in",
+    "zoom_out",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderError:
     """A recoverable provider failure exposed to application callers."""
@@ -38,11 +60,9 @@ class Scene:
             raise ValueError("Scene duration must be positive.")
         if not self.narration.strip() or not self.image_prompt.strip():
             raise ValueError("Scene narration and image prompt cannot be empty.")
-        if not self.transition.strip():
-            raise ValueError("Scene transition cannot be empty.")
-        if self.camera_motion not in {
-            "none", "zoom_in", "zoom_out", "pan", "pan_left", "pan_right",
-        }:
+        if self.transition not in SCENE_TRANSITIONS:
+            raise ValueError(f"Unsupported scene transition: {self.transition}")
+        if self.camera_motion not in SCENE_CAMERA_MOTIONS:
             raise ValueError(f"Unsupported scene camera motion: {self.camera_motion}")
 
 

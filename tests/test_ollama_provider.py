@@ -63,6 +63,26 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(result.error.code, "connection_failed")
         self.assertTrue(result.error.retryable)
 
+    def test_normalizes_unsupported_scene_vocabulary(self) -> None:
+        def opener(request: object, timeout: float) -> FakeResponse:
+            return FakeResponse({"response": _script_json("fade_in", "Zoom")})
+
+        result = OllamaProvider(_settings(), opener).generate_script("Space travel")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(result.scenes[0].transition, "fade")
+        self.assertEqual(result.scenes[0].camera_motion, "zoom_in")
+
+    def test_falls_back_when_scene_vocabulary_is_unknown(self) -> None:
+        def opener(request: object, timeout: float) -> FakeResponse:
+            return FakeResponse({"response": _script_json("kaleidoscope", "dolly")})
+
+        result = OllamaProvider(_settings(), opener).generate_script("Space travel")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(result.scenes[0].transition, "fade")
+        self.assertEqual(result.scenes[0].camera_motion, "none")
+
     def test_rejects_a_malformed_generation_response(self) -> None:
         def opener(request: object, timeout: float) -> FakeResponse:
             return FakeResponse({"response": "not json"})
@@ -77,7 +97,7 @@ def _settings() -> OllamaSettings:
     return OllamaSettings("http://127.0.0.1:11434", "local-llm", 15)
 
 
-def _script_json() -> str:
+def _script_json(transition: str = "fade", camera_motion: str = "zoom_in") -> str:
     return json.dumps(
         {
             "title": "Space travel",
@@ -89,8 +109,8 @@ def _script_json() -> str:
                     "narration": "Space travel is changing quickly.",
                     "image_prompt": "Earth seen from orbit",
                     "duration": 4.0,
-                    "transition": "fade",
-                    "camera_motion": "zoom_in",
+                    "transition": transition,
+                    "camera_motion": camera_motion,
                 },
             ],
         },
@@ -105,8 +125,10 @@ def _request_body() -> dict[str, object]:
             "a JSON object with non-empty string fields: title, hook, call_to_action, "
             "and a scenes array. Each scene must contain order (positive integer), "
             "narration, image_prompt, duration (positive seconds), and transition. "
-            "Include camera_motion as one of: none, zoom_in, zoom_out, pan, pan_left, "
-            "or pan_right. "
+            "Use transition as exactly one of: crossfade, cut, dissolve, fade, none, "
+            "wipedown, wipeleft, wiperight, wipeup. "
+            "Include camera_motion as exactly one of: none, pan, pan_left, pan_right, "
+            "zoom_in, zoom_out. "
             "Order scenes consecutively starting at 1. Topic: Space travel"
         ),
         "stream": False,
