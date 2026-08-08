@@ -22,7 +22,9 @@ Topic
 
 -> Ordered scenes with narration, image prompts, duration, and transitions
 
--> Image Generation and Voice Generation
+-> Voice Generation, then scene durations reconciled to the measured narration
+
+-> Image Generation
 
 -> Subtitle Generation
 
@@ -33,6 +35,10 @@ Topic
 `ScriptResult` is the single source of truth for downstream scene data. There
 is no standalone Prompt Service: the LLM provider generates image prompts as
 part of each scene.
+
+Scene durations from the LLM are estimates and are never used to time the
+video. The voice provider measures each scene and the workflow rewrites the
+durations before anything downstream reads them.
 
 ## Current stack
 
