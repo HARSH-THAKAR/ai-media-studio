@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -24,6 +25,9 @@ from backend.workflow.models import (
     WorkflowResult,
 )
 from backend.workflow.project_store import ProjectPaths, ProjectStore
+
+
+MINIMUM_SCENE_DURATION_SECONDS = 1.0
 
 
 class ReelWorkflow:
@@ -59,6 +63,7 @@ class ReelWorkflow:
         voice_result = self._generate_voice(request, started_at, project, storyboard, voice)
         if isinstance(voice_result, WorkflowResult):
             return voice_result
+        storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
         assets = [GeneratedAsset("narration", voice_result.artifact_path)]
         image_results = self._generate_images(request, project, storyboard, assets)
         failure = next((item for item in image_results if not item.is_success), None)
@@ -125,6 +130,38 @@ class ReelWorkflow:
             error = voice_result.error or ProviderError("missing_artifact", "Voice provider returned no artifact.", False)
             return self._failure(request, project, started_at, "voice", error, storyboard, voice_result)
         return voice_result
+
+    def _reconcile_scene_durations(
+        self,
+        project: ProjectPaths,
+        storyboard: ScriptResult,
+        voice_result: VoiceResult,
+    ) -> ScriptResult:
+        """Replace estimated scene durations with measured narration lengths.
+
+        A language model only guesses how long each scene takes to speak. The
+        voice provider knows, so its measurements become the timeline that
+        rendering and subtitles are built from. Storyboard estimates are kept
+        when a voice provider does not report per-scene measurements.
+        """
+        measured = voice_result.scene_durations
+        if len(measured) != len(storyboard.scenes):
+            self._logger.warning("Voice provider reported no per-scene durations.")
+            return storyboard
+        scenes = tuple(
+            replace(scene, duration=max(duration, MINIMUM_SCENE_DURATION_SECONDS))
+            for scene, duration in zip(storyboard.scenes, measured, strict=True)
+        )
+        reconciled = replace(storyboard, scenes=scenes)
+        self._logger.info(
+            "Reconciled scene durations to %.2f seconds of measured narration.",
+            sum(scene.duration for scene in scenes),
+        )
+        try:
+            self._project_store.save_storyboard(project, reconciled)
+        except OSError:
+            self._logger.exception("Unable to persist reconciled storyboard.")
+        return reconciled
 
     def _generate_images(
         self,

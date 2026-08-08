@@ -55,6 +55,7 @@ class KokoroSettings:
     language_code: str
     sample_rate: int
     model_name: str | None
+    scene_tail_padding_seconds: float = 0.2
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +271,9 @@ def _build_kokoro(values: dict[str, object]) -> KokoroSettings:
         language_code=_optional_string(values, "language_code", "a"),
         sample_rate=_optional_positive_integer(values, "sample_rate", 24_000),
         model_name=model_name.strip() if isinstance(model_name, str) else None,
+        scene_tail_padding_seconds=_optional_nonnegative_float(
+            values, "scene_tail_padding_seconds", 0.2,
+        ),
     )
 
 
@@ -470,6 +474,20 @@ def _optional_positive_float(
     if key not in values:
         return default
     return _positive_float(values, key)
+
+
+def _optional_nonnegative_float(
+    values: dict[str, object], key: str, default: float,
+) -> float:
+    if key not in values:
+        return default
+    try:
+        value = float(values.get(key))  # type: ignore[arg-type]
+    except (TypeError, ValueError) as error:
+        raise ConfigurationError(f"Configuration value '{key}' must be a number.") from error
+    if value < 0:
+        raise ConfigurationError(f"Configuration value '{key}' cannot be negative.")
+    return value
 
 
 def _validate_url(value: str, field_name: str) -> None:

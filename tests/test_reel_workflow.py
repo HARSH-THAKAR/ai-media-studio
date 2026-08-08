@@ -33,6 +33,10 @@ class FakeLlmProvider:
 class FakeVoiceProvider:
     """Write one test narration artifact."""
 
+    def __init__(self, scene_durations: tuple[float, ...] = ()) -> None:
+        """Optionally report measured per-scene narration durations."""
+        self._scene_durations = scene_durations
+
     def generate_voice(
         self,
         storyboard: ScriptResult,
@@ -44,7 +48,10 @@ class FakeVoiceProvider:
         assert output_path is not None
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"audio")
-        return VoiceResult(output_path, 4.0, 0.1, "test", None, 24_000)
+        return VoiceResult(
+            output_path, 4.0, 0.1, "test", None, 24_000,
+            scene_durations=self._scene_durations,
+        )
 
 
 class FakeImageProvider:
@@ -94,6 +101,48 @@ class ReelWorkflowTests(unittest.TestCase):
         self.assertEqual(len(result.assets), 3)
         self.assertIsNotNone(result.storyboard)
         self.assertIsNotNone(result.voice_result)
+
+    def test_replaces_estimated_durations_with_measured_narration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = ReelWorkflow(
+                FakeLlmProvider(),
+                FakeVoiceProvider((5.5, 7.25)),
+                FakeImageProvider(),
+                Path(directory),
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+            storyboard = json.loads(
+                (result.project_path / "storyboard.json").read_text("utf-8"),
+            )
+
+        self.assertTrue(result.is_success)
+        self.assertEqual([scene.duration for scene in result.storyboard.scenes], [5.5, 7.25])
+        self.assertEqual([scene["duration"] for scene in storyboard["scenes"]], [5.5, 7.25])
+
+    def test_enforces_a_minimum_scene_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = ReelWorkflow(
+                FakeLlmProvider(),
+                FakeVoiceProvider((0.2, 6.0)),
+                FakeImageProvider(),
+                Path(directory),
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+        self.assertEqual([scene.duration for scene in result.storyboard.scenes], [1.0, 6.0])
+
+    def test_keeps_estimates_when_no_measurements_are_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider(), FakeImageProvider(), Path(directory),
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+        self.assertEqual([scene.duration for scene in result.storyboard.scenes], [2.0, 2.0])
 
     def test_returns_partial_results_when_an_image_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

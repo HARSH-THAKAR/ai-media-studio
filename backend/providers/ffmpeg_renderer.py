@@ -155,15 +155,19 @@ def _render_command(
     music_settings: MusicSettings,
 ) -> tuple[list[str], float]:
     command = [executable, "-y"]
-    for image, scene in zip(images, scenes, strict=True):
+    overlaps = _scene_overlaps(scenes, settings)
+    for image, scene, overlap in zip(images, scenes, overlaps, strict=True):
         command.extend(
-            ["-framerate", str(settings.frames_per_second), "-loop", "1", "-t", str(scene.duration), "-i", str(image)],
+            [
+                "-framerate", str(settings.frames_per_second), "-loop", "1",
+                "-t", str(scene.duration + overlap), "-i", str(image),
+            ],
         )
     command.extend(["-i", str(narration)])
     if music_path is not None:
         command.extend(["-stream_loop", "-1", "-i", str(music_path)])
     filter_graph, output_duration = _filter_graph(
-        scenes, settings, subtitle_path, music_path is not None, music_settings,
+        scenes, settings, subtitle_path, music_path is not None, music_settings, overlaps,
     )
     command.extend(
         [
@@ -193,12 +197,41 @@ def _filter_graph(
     subtitle_path: Path | None,
     has_music: bool,
     music_settings: MusicSettings,
+    overlaps: tuple[float, ...],
 ) -> tuple[str, float]:
-    video_filters = [_scene_filter(index, scene, settings) for index, scene in enumerate(scenes)]
-    concat_filters, output_label, output_duration = _transition_filters(scenes, settings)
+    video_filters = [
+        _scene_filter(index, scene, settings, overlap)
+        for index, (scene, overlap) in enumerate(zip(scenes, overlaps, strict=True))
+    ]
+    concat_filters, output_label, output_duration = _transition_filters(scenes, overlaps)
     audio = _audio_filter(len(scenes), output_duration, has_music, music_settings)
     video = _video_output_filter(output_label, subtitle_path)
     return ";".join(video_filters + concat_filters + [video, audio]), output_duration
+
+
+def _scene_overlaps(
+    scenes: tuple[Scene, ...], settings: VideoSettings,
+) -> tuple[float, ...]:
+    """Return the transition overlap that follows each scene.
+
+    Each overlap is derived once from measured scene durations so the value
+    used to extend a scene is the same value the transition consumes. A scene
+    followed by a hard cut, and the final scene, contribute no overlap.
+    """
+    overlaps: list[float] = []
+    for index, scene in enumerate(scenes):
+        following = scenes[index + 1] if index + 1 < len(scenes) else None
+        if following is None or _transition_name(following.transition) is None:
+            overlaps.append(0.0)
+            continue
+        overlaps.append(
+            min(
+                settings.transition_duration_seconds,
+                scene.duration / 2,
+                following.duration / 2,
+            ),
+        )
+    return tuple(overlaps)
 
 
 def _subtitle_path(subtitles: SubtitleResult | None) -> Path | None:
@@ -253,18 +286,22 @@ def _escape_filter_path(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
 
-def _scene_filter(index: int, scene: Scene, settings: VideoSettings) -> str:
+def _scene_filter(
+    index: int, scene: Scene, settings: VideoSettings, overlap: float,
+) -> str:
     """Build the per-scene video filter chain.
 
-    ``settb=AVTB`` normalizes every scene onto the microsecond timebase that
-    ``xfade`` emits, so chained transitions keep matching input timebases.
+    The scene is held for its narration plus the overlap the following
+    transition consumes, so the finished timeline matches the narration
+    exactly. ``settb=AVTB`` normalizes every scene onto the microsecond
+    timebase that ``xfade`` emits, keeping chained transitions configurable.
     """
     motion = _motion_filter(scene, settings)
     return (
         f"[{index}:v]scale={settings.width}:{settings.height}:"
         "force_original_aspect_ratio=increase,"
         f"crop={settings.width}:{settings.height}{motion},setsar=1,"
-        f"trim=duration={scene.duration},setpts=PTS-STARTPTS,settb=AVTB[v{index}]"
+        f"trim=duration={scene.duration + overlap},setpts=PTS-STARTPTS,settb=AVTB[v{index}]"
     )
 
 
@@ -293,30 +330,31 @@ def _zoompan_filter(zoom: str, x: str, y: str, settings: VideoSettings) -> str:
 
 
 def _transition_filters(
-    scenes: tuple[Scene, ...], settings: VideoSettings,
+    scenes: tuple[Scene, ...], overlaps: tuple[float, ...],
 ) -> tuple[list[str], str, float]:
+    """Chain scenes together and report the finished timeline length.
+
+    Every transition begins exactly when the outgoing scene's narration ends,
+    so the returned duration equals the total measured narration.
+    """
     if len(scenes) == 1:
         return [], "v0", scenes[0].duration
     filters: list[str] = []
     label = "v0"
-    elapsed = scenes[0].duration
+    elapsed = scenes[0].duration + overlaps[0]
     for index, scene in enumerate(scenes[1:], start=1):
         output_label = f"xf{index}"
-        transition = _transition_name(scene.transition)
-        if transition is None:
+        overlap = overlaps[index - 1]
+        if overlap <= 0:
             filters.append(f"[{label}][v{index}]concat=n=2:v=1:a=0[{output_label}]")
-            elapsed += scene.duration
+            elapsed += scene.duration + overlaps[index]
         else:
-            duration = min(
-                settings.transition_duration_seconds,
-                scenes[index - 1].duration / 2,
-                scene.duration / 2,
-            )
+            transition = _transition_name(scene.transition)
             filters.append(
-                f"[{label}][v{index}]xfade=transition={transition}:duration={duration}:"
-                f"offset={elapsed - duration}[{output_label}]"
+                f"[{label}][v{index}]xfade=transition={transition}:duration={overlap}:"
+                f"offset={elapsed - overlap}[{output_label}]"
             )
-            elapsed += scene.duration - duration
+            elapsed += scene.duration + overlaps[index] - overlap
         label = output_label
     return filters, label, elapsed
 
