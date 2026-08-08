@@ -12,6 +12,8 @@ __pycache__/
 *.py[cod]
 .venv/
 *.egg-info/
+build/
+dist/
 
 # Vendored third-party runtimes and model weights (installed locally, not source)
 comfyui/
