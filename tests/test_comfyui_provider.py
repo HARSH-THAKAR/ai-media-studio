@@ -41,7 +41,7 @@ class ComfyUIProviderTests(unittest.TestCase):
             output_path = Path(directory) / "scene.png"
             submitted_workflows: list[dict[str, object]] = []
 
-            def opener(request: object, timeout: float) -> FakeResponse:
+            def opener(request: object, *, timeout: float) -> FakeResponse:
                 url = getattr(request, "full_url")
                 if url.endswith("/prompt"):
                     body = json.loads(getattr(request, "data").decode("utf-8"))
@@ -68,7 +68,7 @@ class ComfyUIProviderTests(unittest.TestCase):
             prompt_requests = 0
             delays: list[float] = []
 
-            def opener(request: object, timeout: float) -> FakeResponse:
+            def opener(request: object, *, timeout: float) -> FakeResponse:
                 nonlocal prompt_requests
                 url = getattr(request, "full_url")
                 if url.endswith("/prompt"):
