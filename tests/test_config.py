@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from backend.config import ConfigurationError, load_settings
+from backend.config import CONFIG_PATH_VARIABLE, ConfigurationError, load_settings
 
 
 class LoadSettingsTests(unittest.TestCase):
@@ -47,6 +49,47 @@ class LoadSettingsTests(unittest.TestCase):
             )
 
         self.assertEqual(settings.ollama.model, "replacement-llm")
+
+    def test_locates_configuration_from_the_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "elsewhere.toml"
+            config_path.write_text(_valid_config(), encoding="utf-8")
+
+            settings = load_settings(None, {CONFIG_PATH_VARIABLE: str(config_path)})
+
+        self.assertEqual(settings.ollama.model, "local-llm")
+
+    def test_explicit_path_outranks_the_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            chosen = Path(directory) / "chosen.toml"
+            chosen.write_text(_valid_config(), encoding="utf-8")
+            ignored = Path(directory) / "ignored.toml"
+            ignored.write_text(
+                _valid_config().replace("local-llm", "ignored-llm"), encoding="utf-8",
+            )
+
+            settings = load_settings(chosen, {CONFIG_PATH_VARIABLE: str(ignored)})
+
+        self.assertEqual(settings.ollama.model, "local-llm")
+
+    def test_reports_the_selected_path_when_configuration_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "absent.toml"
+
+            with self.assertRaisesRegex(ConfigurationError, "absent.toml"):
+                load_settings(None, {CONFIG_PATH_VARIABLE: str(missing)})
+
+    def test_an_empty_environment_is_not_the_process_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "settings.toml"
+            config_path.write_text(_valid_config(), encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ, {"AI_MEDIA_OLLAMA_MODEL": "leaked-llm"}, clear=False,
+            ):
+                settings = load_settings(config_path, {})
+
+        self.assertEqual(settings.ollama.model, "local-llm")
 
     def test_rejects_invalid_service_url(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

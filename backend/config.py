@@ -10,6 +10,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
+CONFIG_PATH_VARIABLE = "AI_MEDIA_CONFIG"
+
+
 class ConfigurationError(ValueError):
     """Raised when application configuration is missing or invalid."""
 
@@ -144,19 +147,38 @@ def load_settings(
     config_path: Path | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> Settings:
-    """Load validated settings from TOML and optional environment overrides."""
+    """Load validated settings from TOML and optional environment overrides.
+
+    The configuration file is located from an explicit path, then the
+    ``AI_MEDIA_CONFIG`` environment variable, and finally the project's own
+    ``config`` directory.
+    """
+    values = environment if environment is not None else os.environ
     project_root = Path(__file__).resolve().parent.parent
-    source_path = config_path or project_root / "config" / "settings.toml"
+    source_path = _config_source(config_path, values, project_root)
     raw_settings = _load_toml(source_path)
-    _apply_environment_overrides(raw_settings, environment or os.environ)
+    _apply_environment_overrides(raw_settings, values)
     return _build_settings(raw_settings, project_root)
+
+
+def _config_source(
+    config_path: Path | None, environment: Mapping[str, str], project_root: Path,
+) -> Path:
+    if config_path is not None:
+        return config_path
+    configured = environment.get(CONFIG_PATH_VARIABLE, "").strip()
+    if configured:
+        return Path(configured)
+    return project_root / "config" / "settings.toml"
 
 
 def _load_toml(config_path: Path) -> dict[str, object]:
     if not config_path.is_file():
         message = (
             f"Configuration file not found: {config_path}. "
-            "Copy config/settings.example.toml to config/settings.toml and update it."
+            "Copy config/settings.example.toml to config/settings.toml and update it, "
+            f"or select a file with --config or the {CONFIG_PATH_VARIABLE} "
+            "environment variable."
         )
         raise ConfigurationError(message)
 
