@@ -133,6 +133,29 @@ class WordTiming:
 
 
 @dataclass(frozen=True, slots=True)
+class ScriptLength:
+    """How long the finished narration should run, and how fast it is spoken.
+
+    A video lasts exactly as long as its narration, so the only way to aim for
+    a length is to write the right number of words. The speaking rate converts
+    between the two and belongs to the voice, not the script writer, so it is
+    supplied rather than assumed.
+    """
+
+    target_seconds: float
+    words_per_second: float
+
+    @property
+    def target_words(self) -> int:
+        """Return how many spoken words fill the target."""
+        return max(1, round(self.target_seconds * self.words_per_second))
+
+    def seconds_for(self, words: int) -> float:
+        """Return how long a script of this many words takes to speak."""
+        return words / self.words_per_second
+
+
+@dataclass(frozen=True, slots=True)
 class ClipResult:
     """Result returned when a provider animates one scene image."""
 

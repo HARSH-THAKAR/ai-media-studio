@@ -10,6 +10,7 @@ from backend.providers.contracts import (
     BackgroundMusicProvider,
     ImageProvider,
     LLMProvider,
+    ScriptLength,
     SubtitleProvider,
     VideoClipProvider,
     VideoRenderer,
@@ -17,7 +18,7 @@ from backend.providers.contracts import (
 )
 from backend.providers.ffmpeg_renderer import FfmpegRenderer
 from backend.providers.background_music import LocalBackgroundMusicProvider
-from backend.providers.kokoro import KokoroProvider
+from backend.providers.kokoro import WORDS_PER_SECOND, KokoroProvider
 from backend.providers.ollama import OllamaProvider
 from backend.providers.subtitle_provider import SrtSubtitleProvider
 from backend.providers.svd import SvdClipProvider
@@ -44,7 +45,23 @@ def build_container(settings: Settings) -> ServiceContainer[object]:
 
 
 def _build_ollama_provider(settings: Settings) -> LLMProvider:
-    return OllamaProvider(settings.ollama)
+    return OllamaProvider(settings.ollama, length=_script_length(settings))
+
+
+def _script_length(settings: Settings) -> ScriptLength | None:
+    """Describe the narration length to aim for, when one is configured.
+
+    The script writer decides the length of the finished video, because the
+    video runs exactly as long as the narration. Turning a target in seconds
+    into a number of words needs the speaking rate, which belongs to the voice
+    and moves with its configured speed.
+    """
+    if settings.video.target_duration_seconds <= 0:
+        return None
+    return ScriptLength(
+        settings.video.target_duration_seconds,
+        WORDS_PER_SECOND * settings.kokoro.speed,
+    )
 
 
 def _build_comfyui_provider(settings: Settings) -> ImageProvider:
