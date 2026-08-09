@@ -48,6 +48,8 @@ filename = "ai_media_studio.log"
 max_bytes = 5000000
 backup_count = 3
 
+# Reserved for generated-asset caching, which is not implemented yet. These
+# values are validated on load but nothing reads them.
 [cache]
 enabled = true
 directory = "cache"
@@ -59,9 +61,13 @@ volume = 0.15
 fade_duration_seconds = 1.0
 ducking_ratio = 6.0
 
+# Reserved for temporary-artifact cleanup, which is not implemented yet.
 [temp]
 max_age_hours = 24
 
 [gpu]
+# Device used by models running inside this process, which today means Kokoro:
+# "auto" picks CUDA when it is available, "cpu" and "cuda" force the choice.
+# Set "cpu" to keep narration off the graphics card while ComfyUI is using it.
+# ComfyUI and FFmpeg are separate processes and choose their own devices.
 device = "auto"
-# Omit memory_limit_mb to let the selected backend manage available memory.

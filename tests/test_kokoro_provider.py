@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.config import KokoroSettings, PathSettings
+from backend.config import GpuSettings, KokoroSettings, PathSettings
 from backend.providers.contracts import Scene, ScriptResult
 from backend.providers.kokoro import KokoroProvider
 
@@ -20,7 +20,7 @@ class KokoroProviderTests(unittest.TestCase):
             provider = KokoroProvider(
                 _settings(Path(directory)),
                 _paths(Path(directory)),
-                pipeline_factory=lambda _: _pipeline,
+                pipeline_factory=lambda _, __: _pipeline,
                 audio_writer=_write_audio,
             )
 
@@ -37,7 +37,7 @@ class KokoroProviderTests(unittest.TestCase):
             provider = KokoroProvider(
                 _settings(Path(directory)),
                 _paths(Path(directory)),
-                pipeline_factory=lambda _: _pipeline,
+                pipeline_factory=lambda _, __: _pipeline,
                 audio_writer=_write_audio,
             )
 
@@ -54,7 +54,7 @@ class KokoroProviderTests(unittest.TestCase):
             provider = KokoroProvider(
                 _settings(Path(directory), padding=0.5),
                 _paths(Path(directory)),
-                pipeline_factory=lambda _: _pipeline,
+                pipeline_factory=lambda _, __: _pipeline,
                 audio_writer=_write_audio,
             )
 
@@ -64,8 +64,29 @@ class KokoroProviderTests(unittest.TestCase):
 
             self.assertEqual(result.scene_durations, (12_003 / 24_000, 12_003 / 24_000))
 
+    def test_forwards_the_configured_device_to_kokoro(self) -> None:
+        for configured, expected in (("cpu", "cpu"), ("cuda", "cuda"), ("auto", None)):
+            with self.subTest(device=configured), tempfile.TemporaryDirectory() as directory:
+                seen: list[str | None] = []
+
+                def factory(language_code: str, device: str | None) -> object:
+                    seen.append(device)
+                    return _pipeline
+
+                provider = KokoroProvider(
+                    _settings(Path(directory)),
+                    _paths(Path(directory)),
+                    pipeline_factory=factory,
+                    audio_writer=_write_audio,
+                    gpu=GpuSettings(configured),
+                )
+
+                provider.generate_voice(_storyboard(), Path(directory) / "n.wav")
+
+                self.assertEqual(seen, [expected])
+
     def test_returns_a_structured_unavailable_provider_failure(self) -> None:
-        def unavailable_pipeline(language_code: str) -> object:
+        def unavailable_pipeline(language_code: str, device: str | None) -> object:
             raise ModuleNotFoundError(language_code)
 
         provider = KokoroProvider(

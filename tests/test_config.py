@@ -112,7 +112,6 @@ class LoadSettingsTests(unittest.TestCase):
         self.assertTrue(settings.debug)
         self.assertEqual(settings.logging.level, "DEBUG")
         self.assertEqual(settings.cache.max_size_mb, 512)
-        self.assertEqual(settings.gpu.memory_limit_mb, 4096)
 
 
 def _valid_config() -> str:
@@ -167,5 +166,4 @@ max_age_hours = 12
 
 [gpu]
 device = "cuda"
-memory_limit_mb = 4096
 """
