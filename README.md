@@ -1,5 +1,9 @@
 # AI Media Studio
 
+[![tests](https://github.com/HARSH-THAKAR/ai-media-studio/actions/workflows/tests.yml/badge.svg)](https://github.com/HARSH-THAKAR/ai-media-studio/actions/workflows/tests.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+
 AI Media Studio is a fully local AI-powered content creation platform that automatically generates short-form videos for platforms like Instagram Reels, YouTube Shorts, and TikTok.
 
 One topic in, one finished 1080x1920 MP4 out: researched and scripted, narrated,
