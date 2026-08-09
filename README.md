@@ -216,6 +216,26 @@ synthesized, controlled by `video.clip_smoothing`:
 | `motion` | about a minute | Movement between frames is followed, which is sharper when the clip has a clearly moving subject. Raise `video.render_timeout_seconds` to use it. |
 | `none` | none | Frames are repeated, which stutters. |
 
+## The opening line
+
+A storyboard names a `hook` for the opening seconds. It now leads the first
+scene's narration, so it is spoken and captioned like any other line rather than
+being recorded and discarded. Short-form video is decided in its first seconds,
+which made that the most expensive line in the script to be throwing away.
+
+The merge happens once, before the storyboard is written to disk, so a resumed
+run reads back narration that already opens with the hook. A hook the model
+already spoke as its first line is left alone rather than repeated.
+
+A model asked only for a "hook" returns atmospheric scene-setting, so the script
+prompt now says what the hook is for: one sentence, at most twelve words, stating
+a fact, question or claim rather than describing the view. Across five topics on
+`llama3.1:8b` that moved the median hook from fifteen words to eight.
+
+It is guidance, not a guarantee. The model still occasionally overstates, and
+nothing checks a hook's claim against reality; automatic fact checking is Phase 3
+in [ROADMAP.md](ROADMAP.md). Read the opening line before publishing.
+
 ## Subtitles
 
 Captions follow the narration word by word rather than showing a whole scene's
