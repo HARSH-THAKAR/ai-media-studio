@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 
 from backend.config import MusicSettings, PathSettings, VideoSettings
@@ -249,9 +250,89 @@ class FfmpegRendererTests(unittest.TestCase):
         self.assertIn("trim=duration=4.0", command)
 
 
-def _workflow_result(root: Path, scenes: tuple[Scene, ...] | None = None) -> WorkflowResult:
+def _write_wave(path: Path, seconds: float, sample_rate: int = 24_000) -> None:
+    """Write a real, silent WAV so its header reports a genuine length."""
+    with wave.open(str(path), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(b"\x00\x00" * round(seconds * sample_rate))
+
+
+class NarrationGuardTests(unittest.TestCase):
+    """Verify a render is refused when narration and scenes disagree."""
+
+    def test_refuses_when_narration_is_far_shorter_than_the_scenes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            ran: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                ran.append(command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            # Four seconds of scenes against half a second of speech, the shape
+            # left behind when narration is regenerated for part of a project.
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(_workflow_result(root, narration_seconds=0.5))
+
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.error.code, "invalid_workflow")
+        self.assertIn("0.50", result.error.message)
+        self.assertIn("4.00", result.error.message)
+        self.assertEqual(ran, [], "FFmpeg should not be invoked for a broken timeline")
+
+    def test_allows_the_slack_a_minimum_scene_duration_creates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            # A scene stretched up to the minimum leaves the timeline slightly
+            # longer than the speech, which must still render.
+            result = renderer.render(_workflow_result(root, narration_seconds=2.6))
+
+        self.assertTrue(result.is_success)
+
+    def test_renders_matching_narration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(_workflow_result(root, narration_seconds=4.0))
+
+        self.assertTrue(result.is_success)
+
+
+def _workflow_result(
+    root: Path,
+    scenes: tuple[Scene, ...] | None = None,
+    narration_seconds: float | None = None,
+) -> WorkflowResult:
     narration = root / "narration.wav"
-    narration.write_bytes(b"artifact")
+    if narration_seconds is None:
+        narration.write_bytes(b"artifact")
+    else:
+        _write_wave(narration, narration_seconds)
     scenes = scenes or (
         Scene(1, "First scene.", "first", 2.0, "fade"),
         Scene(2, "Second scene.", "second", 2.0, "fade"),
