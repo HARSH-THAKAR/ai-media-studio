@@ -72,6 +72,7 @@ class VideoSettings:
     transition_duration_seconds: float
     animate_still_scenes: bool = True
     camera_motion_strength: float = 0.2
+    clip_smoothing: str = "blend"
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +115,26 @@ class TempSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SvdSettings:
+    """Stable Video Diffusion settings for animating scene images."""
+
+    enabled: bool
+    workflow_path: Path
+    timeout_seconds: int
+    width: int
+    height: int
+    frames: int
+    fps: int
+    motion_bucket_id: int
+    augmentation_level: float
+
+    @property
+    def clip_seconds(self) -> float:
+        """Return how long a generated clip runs before it is retimed."""
+        return self.frames / self.fps
+
+
+@dataclass(frozen=True, slots=True)
 class SubtitleSettings:
     """How narration is split into individual subtitle cues."""
 
@@ -139,6 +160,7 @@ class Settings:
     temp: TempSettings
     gpu: GpuSettings
     subtitles: SubtitleSettings
+    svd: SvdSettings
     paths: PathSettings
     ollama: OllamaSettings
     comfyui: ComfyUiSettings
@@ -260,6 +282,7 @@ def _build_settings(raw: dict[str, object], base_dir: Path) -> Settings:
         temp=_build_temp(_optional_section(raw, "temp")),
         gpu=_build_gpu(_optional_section(raw, "gpu")),
         subtitles=_build_subtitles(_optional_section(raw, "subtitles")),
+        svd=_build_svd(_optional_section(raw, "svd"), base_dir),
         paths=paths,
         ollama=ollama,
         comfyui=comfyui,
@@ -337,7 +360,18 @@ def _build_video(values: dict[str, object]) -> VideoSettings:
         camera_motion_strength=_optional_positive_float(
             values, "camera_motion_strength", 0.2,
         ),
+        clip_smoothing=_clip_smoothing(values),
     )
+
+
+def _clip_smoothing(values: dict[str, object]) -> str:
+    smoothing = _optional_string(values, "clip_smoothing", "blend").lower()
+    if smoothing not in {"motion", "blend", "none"}:
+        raise ConfigurationError(
+            "Configuration value 'video.clip_smoothing' must be "
+            "'motion', 'blend', or 'none'."
+        )
+    return smoothing
 
 
 def _build_logging(
@@ -387,6 +421,24 @@ def _build_gpu(values: dict[str, object]) -> GpuSettings:
     if device not in {"auto", "cpu", "cuda"}:
         raise ConfigurationError("Configuration value 'gpu.device' is invalid.")
     return GpuSettings(device=device)
+
+
+def _build_svd(values: dict[str, object], base_dir: Path) -> SvdSettings:
+    return SvdSettings(
+        enabled=_optional_bool(values, "enabled", False),
+        workflow_path=_optional_path(
+            values, "workflow_path", "config/svd_workflow.json", base_dir,
+        ),
+        timeout_seconds=_optional_positive_integer(values, "timeout_seconds", 900),
+        width=_optional_positive_integer(values, "width", 576),
+        height=_optional_positive_integer(values, "height", 1024),
+        frames=_optional_positive_integer(values, "frames", 25),
+        fps=_optional_positive_integer(values, "fps", 6),
+        motion_bucket_id=_optional_positive_integer(values, "motion_bucket_id", 127),
+        augmentation_level=_optional_nonnegative_float(
+            values, "augmentation_level", 0.0,
+        ),
+    )
 
 
 def _build_subtitles(values: dict[str, object]) -> SubtitleSettings:

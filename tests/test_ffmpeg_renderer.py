@@ -6,10 +6,20 @@ import subprocess
 import tempfile
 import unittest
 import wave
+from dataclasses import replace
 from pathlib import Path
 
 from backend.config import MusicSettings, PathSettings, VideoSettings
-from backend.providers.contracts import ImageResult, MusicResult, Scene, ScriptResult, SubtitleResult, VoiceResult
+from backend.providers.contracts import (
+    ClipResult,
+    ImageResult,
+    MusicResult,
+    ProviderError,
+    Scene,
+    ScriptResult,
+    SubtitleResult,
+    VoiceResult,
+)
 from backend.providers.ffmpeg_renderer import FfmpegRenderer
 from backend.workflow.models import GenerationMetrics, WorkflowRequest, WorkflowResult
 
@@ -259,6 +269,179 @@ def _write_wave(path: Path, seconds: float, sample_rate: int = 24_000) -> None:
         audio.writeframes(b"\x00\x00" * round(seconds * sample_rate))
 
 
+class AnimatedClipTests(unittest.TestCase):
+    """Verify animated clips replace stills and are stretched to fit."""
+
+    def test_stretches_a_clip_across_its_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            workflow_result = _workflow_result(root)
+            clip = root / "scene_001.webm"
+            clip.write_bytes(b"webm")
+            workflow_result = replace(
+                workflow_result,
+                clip_results=(ClipResult(1, clip, "svd", 90.0, 1, clip_seconds=4.0),),
+            )
+
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(workflow_result)
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        # Scene one runs 2.0s plus a 0.5s transition overlap, from a 4.0s clip.
+        self.assertIn("setpts=PTS*0.625", command)
+        self.assertIn("trim=duration=2.5", command)
+        # The clip is fed straight in rather than looped like a still.
+        self.assertIn("-i " + str(clip), command)
+        self.assertNotIn(f"-loop 1 -t 2.5 -i {clip}", command)
+        # Scene two has no clip, so it keeps its still-image treatment.
+        self.assertIn("scene_002.png", command)
+
+    def test_synthesizes_the_frames_a_stretched_clip_lacks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(_clip_workflow(root))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        # Repeating a clip's own frames leaves each on screen long enough to
+        # read as stutter, so the frames in between are generated instead.
+        self.assertIn("minterpolate=fps=30:mi_mode=blend", command)
+        # Interpolation stops at the clip's last frame, so the final frame is
+        # cloned onto the source to cover the rest of the scene.
+        self.assertIn("tpad=stop=-1:stop_mode=clone:stop_duration=1.0", command)
+
+    def test_optionally_follows_movement_between_a_clips_frames(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            settings = replace(_video_settings(), clip_smoothing="motion")
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), settings, _music_settings(root), runner,
+            )
+            result = renderer.render(_clip_workflow(root))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        self.assertIn("mi_mode=mci", command)
+        self.assertIn("tpad=", command)
+
+    def test_optionally_repeats_a_clips_frames_instead(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            settings = replace(_video_settings(), clip_smoothing="none")
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), settings, _music_settings(root), runner,
+            )
+            result = renderer.render(_clip_workflow(root))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        self.assertNotIn("minterpolate", command)
+        # Repeated frames already fill the scene exactly, so nothing is cloned.
+        self.assertNotIn("tpad=", command)
+        self.assertIn("setpts=PTS*0.625,fps=30", command)
+
+    def test_a_clip_scene_is_not_given_camera_motion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            scenes = (Scene(1, "Only.", "only", 3.0, "cut"),)
+            workflow_result = _workflow_result(root, scenes)
+            clip = root / "scene_001.webm"
+            clip.write_bytes(b"webm")
+            workflow_result = replace(
+                workflow_result,
+                clip_results=(ClipResult(1, clip, "svd", 90.0, 1, clip_seconds=4.0),),
+            )
+
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(workflow_result)
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        # The picture already moves, so nothing pans or zooms over it.
+        self.assertNotIn("zoompan", command)
+
+    def test_falls_back_to_the_still_when_a_clip_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            failed = ClipResult(
+                1, None, "svd", 5.0, 1,
+                ProviderError("transient_failure", "Unable to reach ComfyUI.", True),
+            )
+            workflow_result = replace(_workflow_result(root), clip_results=(failed,))
+
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(workflow_result)
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        self.assertIn("scene_001.png", command)
+        self.assertNotIn("setpts=PTS*", command)
+
+
 class NarrationGuardTests(unittest.TestCase):
     """Verify a render is refused when narration and scenes disagree."""
 
@@ -321,6 +504,16 @@ class NarrationGuardTests(unittest.TestCase):
             result = renderer.render(_workflow_result(root, narration_seconds=4.0))
 
         self.assertTrue(result.is_success)
+
+
+def _clip_workflow(root: Path) -> WorkflowResult:
+    """Return a workflow whose first scene is backed by a four second clip."""
+    clip = root / "scene_001.webm"
+    clip.write_bytes(b"webm")
+    return replace(
+        _workflow_result(root),
+        clip_results=(ClipResult(1, clip, "svd", 90.0, 1, clip_seconds=4.0),),
+    )
 
 
 def _workflow_result(

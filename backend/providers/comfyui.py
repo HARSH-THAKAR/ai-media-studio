@@ -3,57 +3,22 @@
 from __future__ import annotations
 
 import copy
-import json
-from collections.abc import Callable
 from pathlib import Path
-from time import monotonic, perf_counter, sleep
-from typing import Protocol
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from time import perf_counter
 
 from backend.config import ComfyUiSettings
 from backend.logging_setup import get_logger
+from backend.providers.comfyui_client import (
+    ComfyUiClient,
+    ComfyUiConfigurationError,
+    ComfyUiError,
+    HttpOpener,
+    Sleeper,
+    TransientComfyUiError,
+    load_workflow,
+    node_title,
+)
 from backend.providers.contracts import ImageResult, ProviderError, Scene
-
-
-class ComfyUiError(ValueError):
-    """Raised when ComfyUI data does not satisfy the provider contract."""
-
-
-class ComfyUiConfigurationError(ComfyUiError):
-    """Raised when a workflow cannot be configured unambiguously."""
-
-
-class TransientComfyUiError(ComfyUiError):
-    """Raised when a ComfyUI operation can safely be retried."""
-
-
-class HttpResponse(Protocol):
-    """Minimum HTTP response interface needed by the ComfyUI transport."""
-
-    def __enter__(self) -> HttpResponse:
-        """Enter the response context."""
-
-    def __exit__(self, *args: object) -> None:
-        """Exit the response context."""
-
-    def read(self) -> bytes:
-        """Read the complete response body."""
-
-
-class HttpOpener(Protocol):
-    """Callable transport compatible with ``urllib.request.urlopen``.
-
-    ``timeout`` is keyword-only because ``urlopen`` takes ``data`` as its
-    second positional parameter.
-    """
-
-    def __call__(self, request: Request, *, timeout: float) -> HttpResponse:
-        """Open a request with the supplied timeout."""
-
-
-Sleeper = Callable[[float], None]
 
 
 class ComfyUIProvider:
@@ -67,8 +32,8 @@ class ComfyUIProvider:
     ) -> None:
         """Initialize the provider with ComfyUI connection and workflow settings."""
         self._settings = settings
-        self._opener = opener or urlopen
-        self._sleeper = sleeper or sleep
+        self._client = ComfyUiClient(settings, opener, sleeper)
+        self._sleeper = self._client.sleeper
         self._logger = get_logger("providers.comfyui")
 
     def generate_image(self, scene: Scene, output_path: Path) -> ImageResult:
@@ -101,63 +66,19 @@ class ComfyUIProvider:
 
     def _generate_once(self, scene: Scene, output_path: Path) -> Path:
         workflow, output_node_id = _inject_prompt(
-            _load_workflow(self._settings.workflow_path), scene,
+            load_workflow(self._settings.workflow_path), scene,
         )
-        prompt_id = self._queue_workflow(workflow)
-        image = self._wait_for_image(prompt_id, output_node_id)
+        prompt_id = self._client.queue(workflow)
+        image = self._client.wait_for_output(prompt_id, output_node_id)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(self._download_image(image))
+        output_path.write_bytes(self._client.download(image))
         return output_path
 
-    def _queue_workflow(self, workflow: dict[str, object]) -> str:
-        response = self._request_json("/prompt", method="POST", payload={"prompt": workflow})
-        prompt_id = response.get("prompt_id")
-        if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyUiError("ComfyUI did not return a prompt identifier.")
-        return prompt_id
 
-    def _wait_for_image(self, prompt_id: str, output_node_id: str) -> dict[str, str]:
-        deadline = monotonic() + self._settings.timeout_seconds
-        while monotonic() < deadline:
-            history = self._request_json(f"/history/{prompt_id}")
-            image = _history_image(history, prompt_id, output_node_id)
-            if image is not None:
-                return image
-            self._sleeper(self._settings.poll_interval_seconds)
-        raise TransientComfyUiError("ComfyUI generation timed out.")
 
-    def _download_image(self, image: dict[str, str]) -> bytes:
-        query = urlencode(image)
-        request = Request(f"{self._base_url}/view?{query}", method="GET")
-        return self._request_bytes(request)
 
-    def _request_json(
-        self, path: str, method: str = "GET", payload: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        request = _json_request(f"{self._base_url}{path}", method, payload)
-        try:
-            content = self._request_bytes(request)
-            response = json.loads(content.decode("utf-8"))
-        except json.JSONDecodeError as error:
-            raise ComfyUiError("ComfyUI returned invalid JSON.") from error
-        if not isinstance(response, dict):
-            raise ComfyUiError("ComfyUI response must be a JSON object.")
-        return response
 
-    def _request_bytes(self, request: Request) -> bytes:
-        try:
-            with self._opener(request, timeout=self._settings.timeout_seconds) as response:
-                return response.read()
-        except HTTPError as error:
-            if error.code >= 500:
-                raise TransientComfyUiError(f"ComfyUI server error: {error.code}") from error
-            raise ComfyUiError(f"ComfyUI request failed: {error.code}") from error
-        except (URLError, TimeoutError, OSError) as error:
-            raise TransientComfyUiError("Unable to reach ComfyUI.") from error
 
-    @property
-    def _base_url(self) -> str:
-        return self._settings.base_url.rstrip("/")
 
     def _failure(
         self,
@@ -178,16 +99,6 @@ class ComfyUIProvider:
             attempts,
             ProviderError(code, str(error), retryable),
         )
-
-
-def _load_workflow(workflow_path: Path) -> dict[str, object]:
-    try:
-        content = json.loads(workflow_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ComfyUiError(f"Unable to load ComfyUI workflow: {error}") from error
-    if not isinstance(content, dict):
-        raise ComfyUiError("ComfyUI workflow must be a JSON object.")
-    return copy.deepcopy(content)
 
 
 def _inject_prompt(
@@ -275,16 +186,16 @@ def _is_sampler(node: dict[object, object]) -> bool:
 
 
 def _is_positive_prompt_node(node: dict[object, object]) -> bool:
-    title = _node_title(node).lower()
+    title = node_title(node).lower()
     return "positive" in title and ("prompt" in title or "text" in title)
 
 
 def _is_save_image_node(node: dict[object, object]) -> bool:
-    label = f"{node.get('class_type', '')} {_node_title(node)}".lower()
+    label = f"{node.get('class_type', '')} {node_title(node)}".lower()
     return "saveimage" in label.replace(" ", "")
 
 
-def _node_title(node: dict[object, object]) -> str:
+def node_title(node: dict[object, object]) -> str:
     metadata = node.get("_meta")
     if isinstance(metadata, dict) and isinstance(metadata.get("title"), str):
         return metadata["title"]
@@ -312,43 +223,3 @@ def _unique_candidates(
 ) -> tuple[tuple[str, tuple[str, ...]], ...]:
     unique = {node_id: inputs for node_id, inputs in candidates}
     return tuple(unique.items())
-
-
-def _history_image(
-    history: dict[str, object], prompt_id: str, output_node_id: str,
-) -> dict[str, str] | None:
-    job = history.get(prompt_id)
-    if not isinstance(job, dict):
-        return None
-    outputs = job.get("outputs")
-    if not isinstance(outputs, dict):
-        return None
-    output = outputs.get(output_node_id)
-    if not isinstance(output, dict):
-        return None
-    images = output.get("images")
-    if not isinstance(images, list) or not images:
-        return None
-    return _image_descriptor(images[0])
-
-
-def _image_descriptor(value: object) -> dict[str, str]:
-    if not isinstance(value, dict):
-        raise ComfyUiError("ComfyUI image descriptor is invalid.")
-    filename = value.get("filename")
-    if not isinstance(filename, str) or not filename:
-        raise ComfyUiError("ComfyUI image descriptor has no filename.")
-    descriptor = {"filename": filename}
-    for key in ("subfolder", "type"):
-        item = value.get(key, "")
-        if isinstance(item, str):
-            descriptor[key] = item
-    return descriptor
-
-
-def _json_request(
-    url: str, method: str, payload: dict[str, object] | None,
-) -> Request:
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    headers = {"Content-Type": "application/json"} if data is not None else {}
-    return Request(url, data=data, headers=headers, method=method)

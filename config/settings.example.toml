@@ -48,6 +48,15 @@ transition_duration_seconds = 0.5
 animate_still_scenes = true
 # How far a zoom or pan travels, as a fraction. 0.2 zooms to 1.2x over a scene.
 camera_motion_strength = 0.2
+# How the missing frames are produced when an SVD clip is slowed to fill its
+# scene. A clip holds about twenty five frames, so repeating them leaves each
+# picture on screen for a third of a second, which looks like stuttering rather
+# than slow motion. "blend" fades each frame into the next and costs a few
+# seconds per scene. "motion" follows the movement between frames, which is
+# sharper on clips with a clearly moving subject, but takes roughly a minute
+# per scene and needs a larger render_timeout_seconds. "none" repeats frames.
+# Ignored unless [svd] is enabled.
+clip_smoothing = "blend"
 
 [logging]
 level = "INFO"
@@ -57,6 +66,24 @@ directory = "logs"
 filename = "ai_media_studio.log"
 max_bytes = 5000000
 backup_count = 3
+
+# Animate each scene image with Stable Video Diffusion, so the picture itself
+# moves rather than being panned across. Off by default: it needs an SVD
+# checkpoint in ComfyUI and adds one to three minutes per scene.
+[svd]
+enabled = false
+workflow_path = "config/svd_workflow.json"
+# Generous, because a clip takes far longer than a still image.
+timeout_seconds = 900
+# Portrait, close to the aspect ratio of the finished video.
+width = 576
+height = 1024
+# 25 frames at 6 fps is roughly four seconds, stretched to fill each scene.
+frames = 25
+fps = 6
+# Higher values move more, at the cost of coherence.
+motion_bucket_id = 127
+augmentation_level = 0.0
 
 [subtitles]
 # Subtitles follow the narration word by word, using timings measured while the

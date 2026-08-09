@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.providers.contracts import (
+    ClipResult,
     ImageResult,
     MusicResult,
     ProviderError,
@@ -86,6 +87,7 @@ class WorkflowResult:
     metrics: GenerationMetrics
     project_path: Path
     error: WorkflowError | None = None
+    clip_results: tuple[ClipResult, ...] = ()
 
     @property
     def is_success(self) -> bool:

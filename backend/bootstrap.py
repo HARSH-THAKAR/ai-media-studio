@@ -11,6 +11,7 @@ from backend.providers.contracts import (
     ImageProvider,
     LLMProvider,
     SubtitleProvider,
+    VideoClipProvider,
     VideoRenderer,
     VoiceProvider,
 )
@@ -19,6 +20,7 @@ from backend.providers.background_music import LocalBackgroundMusicProvider
 from backend.providers.kokoro import KokoroProvider
 from backend.providers.ollama import OllamaProvider
 from backend.providers.subtitle_provider import SrtSubtitleProvider
+from backend.providers.svd import SvdClipProvider
 from backend.workflow.production_workflow import ProductionWorkflow
 from backend.workflow.reel_workflow import ReelWorkflow
 
@@ -33,6 +35,7 @@ def build_container(settings: Settings) -> ServiceContainer[object]:
     container.register_factory(VideoRenderer, _build_ffmpeg_renderer)
     container.register_factory(BackgroundMusicProvider, _build_background_music_provider)
     container.register_factory(SubtitleProvider, _build_subtitle_provider)
+    container.register_factory(VideoClipProvider, _build_clip_provider)
     container.register_factory(ReelWorkflow, lambda _: _build_reel_workflow(container))
     container.register_factory(
         ProductionWorkflow, lambda _: _build_production_workflow(container),
@@ -60,6 +63,10 @@ def _build_background_music_provider(settings: Settings) -> BackgroundMusicProvi
     return LocalBackgroundMusicProvider(settings.music)
 
 
+def _build_clip_provider(settings: Settings) -> VideoClipProvider:
+    return SvdClipProvider(settings.comfyui, settings.svd)
+
+
 def _build_subtitle_provider(settings: Settings) -> SubtitleProvider:
     return SrtSubtitleProvider(settings.subtitles)
 
@@ -76,9 +83,13 @@ def _build_production_workflow(
 
 
 def _build_reel_workflow(container: ServiceContainer[object]) -> ReelWorkflow:
+    settings = container.settings
     return ReelWorkflow(
         container.get(LLMProvider),
         container.get(VoiceProvider),
         container.get(ImageProvider),
-        container.settings.paths.output_dir,
+        settings.paths.output_dir,
+        clip_provider=(
+            container.get(VideoClipProvider) if settings.svd.enabled else None
+        ),
     )
