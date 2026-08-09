@@ -133,6 +133,24 @@ class WordTiming:
 
 
 @dataclass(frozen=True, slots=True)
+class ClipResult:
+    """Result returned when a provider animates one scene image."""
+
+    scene_order: int
+    artifact_path: Path | None
+    provider: str
+    duration_seconds: float
+    attempts: int
+    error: ProviderError | None = None
+    clip_seconds: float = 0.0
+
+    @property
+    def is_success(self) -> bool:
+        """Return whether clip generation completed successfully."""
+        return self.error is None
+
+
+@dataclass(frozen=True, slots=True)
 class VoiceResult:
     """Result returned when a voice provider generates narration audio."""
 
@@ -240,6 +258,25 @@ class ImageProvider(Protocol):
 
     def generate_image(self, scene: Scene, output_path: Path) -> ImageResult:
         """Generate an image artifact for one canonical project scene."""
+
+
+@runtime_checkable
+class VideoClipProvider(Protocol):
+    """Provider contract for animating one scene image into a short clip."""
+
+    @property
+    def clip_seconds(self) -> float:
+        """Return how long the clips this provider produces run.
+
+        A renderer stretches a clip across its scene, so it needs the clip's
+        own length. Reporting it here lets a clip left on disk by an earlier
+        run be reused without generating it again to find out.
+        """
+
+    def generate_clip(
+        self, scene: Scene, image_path: Path, output_path: Path,
+    ) -> ClipResult:
+        """Animate a generated scene image and save the clip locally."""
 
 
 @runtime_checkable

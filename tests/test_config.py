@@ -44,6 +44,28 @@ class LoadSettingsTests(unittest.TestCase):
         self.assertTrue(settings.cache.enabled)
         self.assertEqual(settings.temp.max_age_hours, 24)
         self.assertEqual(settings.gpu.device, "auto")
+        self.assertEqual(settings.video.clip_smoothing, "blend")
+
+    def test_selects_how_clips_are_smoothed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "settings.toml"
+            config_path.write_text(
+                _valid_config() + '\nclip_smoothing = "Motion"\n', encoding="utf-8",
+            )
+
+            settings = load_settings(config_path, {})
+
+        self.assertEqual(settings.video.clip_smoothing, "motion")
+
+    def test_rejects_an_unknown_clip_smoothing_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "settings.toml"
+            config_path.write_text(
+                _valid_config() + '\nclip_smoothing = "optical"\n', encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ConfigurationError, "clip_smoothing"):
+                load_settings(config_path, {})
 
     def test_environment_overrides_take_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

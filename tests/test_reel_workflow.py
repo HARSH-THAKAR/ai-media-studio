@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from backend.providers.contracts import (
+    ClipResult,
     ImageResult,
     ProviderError,
     Scene,
@@ -94,6 +95,107 @@ class _UnusableVoiceProvider:
     ) -> VoiceResult:
         """Raise because the persisted narration should be reused."""
         raise AssertionError("Resume regenerated the narration.")
+
+
+class FakeClipProvider:
+    """Write one test clip artifact for each scene image."""
+
+    def __init__(self, fail_order: int | None = None) -> None:
+        """Optionally configure a scene whose animation fails."""
+        self._fail_order = fail_order
+        self.animated: list[int] = []
+
+    @property
+    def clip_seconds(self) -> float:
+        """Report the length of the clips this provider writes."""
+        return 4.0
+
+    def generate_clip(
+        self, scene: Scene, image_path: Path, output_path: Path,
+    ) -> ClipResult:
+        """Record the call and write a clip, or return the configured failure."""
+        self.animated.append(scene.order)
+        if scene.order == self._fail_order:
+            return ClipResult(
+                scene.order, None, "test", 0.1, 1,
+                ProviderError("transient_failure", "Clip failed.", True),
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"clip")
+        return ClipResult(scene.order, output_path, "test", 0.1, 1, clip_seconds=4.0)
+
+
+class ReelWorkflowClipTests(unittest.TestCase):
+    """Verify scene images are animated when a clip provider is configured."""
+
+    def test_animates_every_scene_and_records_the_clips(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            clips = FakeClipProvider()
+            workflow = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider(), FakeImageProvider(),
+                Path(directory), clip_provider=clips,
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+            self.assertTrue((result.project_path / "clips").is_dir())
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(clips.animated, [1, 2])
+        self.assertEqual(len(result.clip_results), 2)
+        self.assertEqual(result.clip_results[0].clip_seconds, 4.0)
+        self.assertEqual(
+            sum(1 for asset in result.assets if asset.kind == "clip"), 2,
+        )
+
+    def test_leaves_scenes_alone_without_a_clip_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider(), FakeImageProvider(), Path(directory),
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(result.clip_results, ())
+
+    def test_reports_a_failed_animation_as_the_clip_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workflow = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider(), FakeImageProvider(),
+                Path(directory), clip_provider=FakeClipProvider(fail_order=2),
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.error.stage, "clip")
+
+    def test_resume_reuses_clips_already_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            first = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider((3.0, 4.0)), FakeImageProvider(),
+                output_dir, clip_provider=FakeClipProvider(),
+            ).generate("Why Japan Never Sleeps")
+            self.assertTrue(first.is_success)
+
+            clips = FakeClipProvider()
+            resumed = ReelWorkflow(
+                _UnusableLlmProvider(), _UnusableVoiceProvider(), FakeImageProvider(),
+                output_dir, clip_provider=clips,
+            ).resume(first.project_path)
+
+        self.assertTrue(resumed.is_success)
+        # Animating is the most expensive stage, so nothing is redone.
+        self.assertEqual(clips.animated, [])
+        self.assertEqual(len(resumed.clip_results), 2)
+        # A renderer stretches a clip across its scene, so a reused clip is
+        # useless without its length. Leaving it at zero makes the renderer
+        # treat the clip as a still image.
+        self.assertEqual(
+            [result.clip_seconds for result in resumed.clip_results], [4.0, 4.0],
+        )
 
 
 class ReelWorkflowTests(unittest.TestCase):
