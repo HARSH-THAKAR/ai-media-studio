@@ -175,8 +175,8 @@ missing candidates return a structured configuration error.
 
 Every workflow execution creates a timestamp-and-slug project directory under
 `output/`. It contains the canonical `manifest.json`, `storyboard.json`,
-`narration.wav`, generated `images/`, and reserved `video/` and `logs/`
-directories for future workflow stages and GUI features.
+`narration.wav`, the `word_timings.json` captions are built from, generated
+`images/` and `clips/`, and `video/` and `logs/` directories.
 
 ## Background music
 
@@ -229,7 +229,12 @@ divided into cues of roughly equal length, controlled by
 `subtitles.max_characters_per_cue`, and each cue stays on screen until the next
 begins so captions never blink out mid-sentence.
 
-A voice provider that reports no word timings falls back to one cue per scene.
+Only the voice provider that spoke the script can measure this, and a resumed
+run reuses narration rather than speaking it again, so the timings are written
+to `word_timings.json` and read back. Resuming keeps captions word by word.
+
+A voice provider that reports no word timings falls back to one cue per scene,
+as does a project generated before those timings were recorded.
 
 ## Scene motion and transitions
 
