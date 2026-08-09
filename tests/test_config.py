@@ -41,10 +41,34 @@ class LoadSettingsTests(unittest.TestCase):
         self.assertEqual(settings.config_version, 1)
         self.assertFalse(settings.debug)
         self.assertEqual(settings.logging.level, "INFO")
-        self.assertTrue(settings.cache.enabled)
-        self.assertEqual(settings.temp.max_age_hours, 24)
         self.assertEqual(settings.gpu.device, "auto")
         self.assertEqual(settings.video.clip_smoothing, "blend")
+
+    def test_ignores_settings_that_were_retired(self) -> None:
+        retired = _valid_config().replace(
+            "[paths]", '[paths]\nassets_dir = "assets"',
+        ) + """
+[cache]
+enabled = true
+directory = "cache"
+max_size_mb = 512
+
+[temp]
+max_age_hours = 12
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "settings.toml"
+            config_path.write_text(retired, encoding="utf-8")
+
+            settings = load_settings(config_path, {})
+
+        # These were validated on load and never read, so they were removed.
+        # A settings file written before that must still work rather than
+        # failing on keys the application no longer knows about.
+        self.assertEqual(settings.ollama.model, "local-llm")
+        self.assertFalse(hasattr(settings, "cache"))
+        self.assertFalse(hasattr(settings, "temp"))
+        self.assertFalse(hasattr(settings.paths, "assets_dir"))
 
     def test_selects_how_clips_are_smoothed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -166,13 +190,12 @@ class LoadSettingsTests(unittest.TestCase):
 
         self.assertTrue(settings.debug)
         self.assertEqual(settings.logging.level, "DEBUG")
-        self.assertEqual(settings.cache.max_size_mb, 512)
+        self.assertEqual(settings.gpu.device, "cuda")
 
 
 def _valid_config() -> str:
     return """
 [paths]
-assets_dir = "assets"
 output_dir = "output"
 temp_dir = "temp"
 ffmpeg_executable = "ffmpeg"

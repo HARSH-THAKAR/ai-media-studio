@@ -7,7 +7,6 @@ debug = false
 # when this is the project's own config/settings.toml, and against this file's
 # own directory otherwise. Absolute paths are always used as given.
 [paths]
-assets_dir = "assets"
 output_dir = "output"
 temp_dir = "temp"
 ffmpeg_executable = "ffmpeg"
@@ -92,22 +91,11 @@ augmentation_level = 0.0
 # single word.
 max_characters_per_cue = 32
 
-# Reserved for generated-asset caching, which is not implemented yet. These
-# values are validated on load but nothing reads them.
-[cache]
-enabled = true
-directory = "cache"
-max_size_mb = 1024
-
 [music]
 directory = "music"
 volume = 0.15
 fade_duration_seconds = 1.0
 ducking_ratio = 6.0
-
-# Reserved for temporary-artifact cleanup, which is not implemented yet.
-[temp]
-max_age_hours = 24
 
 [gpu]
 # Device used by models running inside this process, which today means Kokoro:
