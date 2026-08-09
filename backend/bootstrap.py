@@ -49,7 +49,7 @@ def _build_comfyui_provider(settings: Settings) -> ImageProvider:
 
 
 def _build_kokoro_provider(settings: Settings) -> VoiceProvider:
-    return KokoroProvider(settings.kokoro, settings.paths)
+    return KokoroProvider(settings.kokoro, settings.paths, gpu=settings.gpu)
 
 
 def _build_ffmpeg_renderer(settings: Settings) -> VideoRenderer:

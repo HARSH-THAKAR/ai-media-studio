@@ -7,12 +7,12 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-from backend.config import KokoroSettings, PathSettings
+from backend.config import GpuSettings, KokoroSettings, PathSettings
 from backend.logging_setup import get_logger
 from backend.providers.contracts import ProviderError, ScriptResult, VoiceResult
 
 
-PipelineFactory = Callable[[str], Any]
+PipelineFactory = Callable[[str, str | None], Any]
 AudioWriter = Callable[[str, list[float], int], None]
 
 
@@ -25,10 +25,12 @@ class KokoroProvider:
         paths: PathSettings,
         pipeline_factory: PipelineFactory | None = None,
         audio_writer: AudioWriter | None = None,
+        gpu: GpuSettings | None = None,
     ) -> None:
         """Initialize the provider with settings and injectable local adapters."""
         self._settings = settings
         self._paths = paths
+        self._device = _device_for(gpu)
         self._pipeline_factory = pipeline_factory or _create_pipeline
         self._audio_writer = audio_writer or _write_audio
         self._pipeline: Any | None = None
@@ -92,7 +94,9 @@ class KokoroProvider:
         return samples, tuple(durations)
 
     def _generate_samples(self, narration: str, voice: str | None) -> list[float]:
-        pipeline = self._pipeline or self._pipeline_factory(self._settings.language_code)
+        pipeline = self._pipeline or self._pipeline_factory(
+            self._settings.language_code, self._device,
+        )
         self._pipeline = pipeline
         generator: Iterable[tuple[object, object, Iterable[float]]] = pipeline(
             narration,
@@ -122,10 +126,21 @@ class KokoroProvider:
         )
 
 
-def _create_pipeline(language_code: str) -> Any:
+def _device_for(gpu: GpuSettings | None) -> str | None:
+    """Translate the configured device onto Kokoro's own selection.
+
+    Kokoro treats ``None`` as automatic selection, which is what ``auto``
+    means here, and accepts ``cuda`` or ``cpu`` to force a choice.
+    """
+    if gpu is None or gpu.device == "auto":
+        return None
+    return gpu.device
+
+
+def _create_pipeline(language_code: str, device: str | None) -> Any:
     from kokoro import KPipeline
 
-    return KPipeline(lang_code=language_code)
+    return KPipeline(lang_code=language_code, device=device)
 
 
 def _write_audio(output_path: str, samples: list[float], sample_rate: int) -> None:

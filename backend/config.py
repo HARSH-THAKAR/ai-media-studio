@@ -113,10 +113,9 @@ class TempSettings:
 
 @dataclass(frozen=True, slots=True)
 class GpuSettings:
-    """Device selection limits for local AI services."""
+    """Device selection for AI models that run inside this process."""
 
     device: str
-    memory_limit_mb: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +214,6 @@ def _apply_environment_overrides(
         "AI_MEDIA_CACHE_DIRECTORY": ("cache", "directory"),
         "AI_MEDIA_TEMP_MAX_AGE_HOURS": ("temp", "max_age_hours"),
         "AI_MEDIA_GPU_DEVICE": ("gpu", "device"),
-        "AI_MEDIA_GPU_MEMORY_LIMIT_MB": ("gpu", "memory_limit_mb"),
     }
     for variable, (section, key) in overrides.items():
         value = environment.get(variable)
@@ -359,10 +357,7 @@ def _build_gpu(values: dict[str, object]) -> GpuSettings:
     device = _optional_string(values, "device", "auto").lower()
     if device not in {"auto", "cpu", "cuda"}:
         raise ConfigurationError("Configuration value 'gpu.device' is invalid.")
-    return GpuSettings(
-        device=device,
-        memory_limit_mb=_optional_positive_integer_or_none(values, "memory_limit_mb"),
-    )
+    return GpuSettings(device=device)
 
 
 def _section(settings: dict[str, object], name: str) -> dict[str, object]:
@@ -449,14 +444,6 @@ def _optional_positive_integer(
 ) -> int:
     if key not in values:
         return default
-    return _positive_integer(values, key)
-
-
-def _optional_positive_integer_or_none(
-    values: dict[str, object], key: str,
-) -> int | None:
-    if key not in values or values[key] is None:
-        return None
     return _positive_integer(values, key)
 
 
