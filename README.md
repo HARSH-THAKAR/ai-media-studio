@@ -139,8 +139,22 @@ $env:AI_MEDIA_CONFIG = "D:\studio\settings.toml"
 ```
 
 This is what an installed (non-editable) copy needs, since it has no project
-directory to read from. Relative paths inside `[paths]` still resolve against
-the project directory, so an installed copy should set absolute paths.
+directory of its own.
+
+Relative paths resolve against the project directory when you use the project's
+own `config/settings.toml`, and against the settings file's own directory
+otherwise. So an installed copy only needs a folder containing a settings file:
+
+```
+D:\studio\
+  settings.toml       relative paths below resolve against D:\studio
+  config\
+    comfyui_workflow.json
+  music\
+  output\             created here
+```
+
+No absolute paths required.
 
 ## Tests
 

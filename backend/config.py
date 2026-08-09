@@ -21,7 +21,7 @@ class ConfigurationError(ValueError):
 class PathSettings:
     """Filesystem locations used by the application."""
 
-    project_root: Path
+    base_dir: Path
     assets_dir: Path
     output_dir: Path
     temp_dir: Path
@@ -157,7 +157,7 @@ def load_settings(
     source_path = _config_source(config_path, values, project_root)
     raw_settings = _load_toml(source_path)
     _apply_environment_overrides(raw_settings, values)
-    return _build_settings(raw_settings, project_root)
+    return _build_settings(raw_settings, _base_dir(source_path, project_root))
 
 
 def _config_source(
@@ -169,6 +169,20 @@ def _config_source(
     if configured:
         return Path(configured)
     return project_root / "config" / "settings.toml"
+
+
+def _base_dir(source_path: Path, project_root: Path) -> Path:
+    """Return the directory that relative configuration paths resolve against.
+
+    The project's own settings file resolves against the project directory, so
+    a source checkout keeps producing its output, logs, and temporary files
+    where it always has. Any other settings file resolves against its own
+    directory, which gives an installed copy somewhere to work without naming
+    an absolute path for every location.
+    """
+    if source_path.resolve() == (project_root / "config" / "settings.toml"):
+        return project_root
+    return source_path.resolve().parent
 
 
 def _load_toml(config_path: Path) -> dict[str, object]:
@@ -221,18 +235,18 @@ def _apply_environment_overrides(
             _ensure_section(settings, section)[key] = value
 
 
-def _build_settings(raw: dict[str, object], project_root: Path) -> Settings:
-    paths = _build_paths(_section(raw, "paths"), project_root)
+def _build_settings(raw: dict[str, object], base_dir: Path) -> Settings:
+    paths = _build_paths(_section(raw, "paths"), base_dir)
     ollama = _build_ollama(_section(raw, "ollama"))
-    comfyui = _build_comfyui(_section(raw, "comfyui"), project_root)
+    comfyui = _build_comfyui(_section(raw, "comfyui"), base_dir)
     kokoro = _build_kokoro(_section(raw, "kokoro"))
     video = _build_video(_section(raw, "video"))
     return Settings(
         config_version=_config_version(raw),
         debug=_optional_bool(raw, "debug", False),
-        logging=_build_logging(_optional_section(raw, "logging"), project_root),
-        cache=_build_cache(_optional_section(raw, "cache"), project_root),
-        music=_build_music(_optional_section(raw, "music"), project_root),
+        logging=_build_logging(_optional_section(raw, "logging"), base_dir),
+        cache=_build_cache(_optional_section(raw, "cache"), base_dir),
+        music=_build_music(_optional_section(raw, "music"), base_dir),
         temp=_build_temp(_optional_section(raw, "temp")),
         gpu=_build_gpu(_optional_section(raw, "gpu")),
         paths=paths,
@@ -243,13 +257,13 @@ def _build_settings(raw: dict[str, object], project_root: Path) -> Settings:
     )
 
 
-def _build_paths(values: dict[str, object], project_root: Path) -> PathSettings:
+def _build_paths(values: dict[str, object], base_dir: Path) -> PathSettings:
     return PathSettings(
-        project_root=project_root,
-        assets_dir=_resolve_path(values, "assets_dir", project_root),
-        output_dir=_resolve_path(values, "output_dir", project_root),
-        temp_dir=_resolve_path(values, "temp_dir", project_root),
-        ffmpeg_executable=_resolve_executable(values, project_root),
+        base_dir=base_dir,
+        assets_dir=_resolve_path(values, "assets_dir", base_dir),
+        output_dir=_resolve_path(values, "output_dir", base_dir),
+        temp_dir=_resolve_path(values, "temp_dir", base_dir),
+        ffmpeg_executable=_resolve_executable(values, base_dir),
     )
 
 
@@ -263,12 +277,12 @@ def _build_ollama(values: dict[str, object]) -> OllamaSettings:
     )
 
 
-def _build_comfyui(values: dict[str, object], project_root: Path) -> ComfyUiSettings:
+def _build_comfyui(values: dict[str, object], base_dir: Path) -> ComfyUiSettings:
     base_url = _required_string(values, "base_url")
     _validate_url(base_url, "comfyui.base_url")
     return ComfyUiSettings(
         base_url=base_url,
-        workflow_path=_resolve_path(values, "workflow_path", project_root),
+        workflow_path=_resolve_path(values, "workflow_path", base_dir),
         timeout_seconds=_optional_positive_integer(values, "timeout_seconds", 120),
         poll_interval_seconds=_optional_positive_float(
             values, "poll_interval_seconds", 1.0,
@@ -312,7 +326,7 @@ def _build_video(values: dict[str, object]) -> VideoSettings:
 
 
 def _build_logging(
-    values: dict[str, object], project_root: Path,
+    values: dict[str, object], base_dir: Path,
 ) -> LoggingSettings:
     level = _optional_string(values, "level", "INFO").upper()
     if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -321,24 +335,24 @@ def _build_logging(
         level=level,
         console_enabled=_optional_bool(values, "console_enabled", True),
         file_enabled=_optional_bool(values, "file_enabled", True),
-        directory=_optional_path(values, "directory", "logs", project_root),
+        directory=_optional_path(values, "directory", "logs", base_dir),
         filename=_optional_string(values, "filename", "ai_media_studio.log"),
         max_bytes=_optional_positive_integer(values, "max_bytes", 5_000_000),
         backup_count=_optional_positive_integer(values, "backup_count", 3),
     )
 
 
-def _build_cache(values: dict[str, object], project_root: Path) -> CacheSettings:
+def _build_cache(values: dict[str, object], base_dir: Path) -> CacheSettings:
     return CacheSettings(
         enabled=_optional_bool(values, "enabled", True),
-        directory=_optional_path(values, "directory", "cache", project_root),
+        directory=_optional_path(values, "directory", "cache", base_dir),
         max_size_mb=_optional_positive_integer(values, "max_size_mb", 1_024),
     )
 
 
-def _build_music(values: dict[str, object], project_root: Path) -> MusicSettings:
+def _build_music(values: dict[str, object], base_dir: Path) -> MusicSettings:
     return MusicSettings(
-        directory=_optional_path(values, "directory", "music", project_root),
+        directory=_optional_path(values, "directory", "music", base_dir),
         volume=_optional_positive_float(values, "volume", 0.15),
         fade_duration_seconds=_optional_positive_float(
             values, "fade_duration_seconds", 1.0,
@@ -382,24 +396,24 @@ def _ensure_section(settings: dict[str, object], name: str) -> dict[str, object]
 
 
 def _resolve_path(
-    values: dict[str, object], key: str, project_root: Path,
+    values: dict[str, object], key: str, base_dir: Path,
 ) -> Path:
     value = Path(_required_string(values, key))
-    return value if value.is_absolute() else project_root / value
+    return value if value.is_absolute() else base_dir / value
 
 
 def _optional_path(
-    values: dict[str, object], key: str, default: str, project_root: Path,
+    values: dict[str, object], key: str, default: str, base_dir: Path,
 ) -> Path:
     value = Path(_optional_string(values, key, default))
-    return value if value.is_absolute() else project_root / value
+    return value if value.is_absolute() else base_dir / value
 
 
-def _resolve_executable(values: dict[str, object], project_root: Path) -> str:
+def _resolve_executable(values: dict[str, object], base_dir: Path) -> str:
     executable = _required_string(values, "ffmpeg_executable")
     candidate = Path(executable)
     if candidate.is_absolute() or candidate.parent != Path("."):
-        return str(_resolve_path(values, "ffmpeg_executable", project_root))
+        return str(_resolve_path(values, "ffmpeg_executable", base_dir))
     return executable
 
 

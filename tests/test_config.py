@@ -8,7 +8,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from backend.config import CONFIG_PATH_VARIABLE, ConfigurationError, load_settings
+from backend import config as backend_config
+from backend.config import (
+    CONFIG_PATH_VARIABLE,
+    ConfigurationError,
+    _base_dir,
+    load_settings,
+)
 
 
 class LoadSettingsTests(unittest.TestCase):
@@ -90,6 +96,33 @@ class LoadSettingsTests(unittest.TestCase):
                 settings = load_settings(config_path, {})
 
         self.assertEqual(settings.ollama.model, "local-llm")
+
+    def test_relative_paths_resolve_beside_a_chosen_settings_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            studio = Path(directory).resolve()
+            config_path = studio / "settings.toml"
+            config_path.write_text(_valid_config(), encoding="utf-8")
+
+            settings = load_settings(config_path, {})
+
+        self.assertEqual(settings.paths.base_dir, studio)
+        self.assertEqual(settings.paths.output_dir, studio / "output")
+        self.assertEqual(settings.paths.temp_dir, studio / "temp")
+        self.assertEqual(settings.music.directory, studio / "music")
+        self.assertEqual(settings.logging.directory, studio / "logs")
+        self.assertEqual(settings.comfyui.workflow_path, studio / "config" / "workflow.json")
+
+    def test_the_projects_own_settings_file_resolves_against_the_project(self) -> None:
+        project_root = Path(backend_config.__file__).resolve().parent.parent
+
+        self.assertEqual(
+            _base_dir(project_root / "config" / "settings.toml", project_root),
+            project_root,
+        )
+        self.assertEqual(
+            _base_dir(Path("D:/studio/settings.toml"), project_root),
+            Path("D:/studio").resolve(),
+        )
 
     def test_rejects_invalid_service_url(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

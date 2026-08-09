@@ -3,6 +3,9 @@
 config_version = 1
 debug = false
 
+# Relative paths anywhere in this file resolve against the project directory
+# when this is the project's own config/settings.toml, and against this file's
+# own directory otherwise. Absolute paths are always used as given.
 [paths]
 assets_dir = "assets"
 output_dir = "output"

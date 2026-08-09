@@ -69,23 +69,15 @@ narrated, subtitled MP4 entirely on local infrastructure.
 
 ## Next
 
-- [ ] Overlap narration and image generation
+Phases 1 and 2 are finished and the known defects are cleared. What remains is
+Phase 3 and beyond in [ROADMAP.md](ROADMAP.md): automatic research and fact
+checking, then a web dashboard, then scheduled uploading.
 
-  Image generation reads only each scene's image prompt and order, never its
-  duration, so it does not depend on narration at all. Running the two stages
-  together would take roughly 110 seconds off a 505 second run. Both use the
-  GPU, so the `gpu` section below should be honoured first, to keep the voice
-  model off the card while an image model is resident.
+- [ ] Implement, or remove, the settings that are still only validated
 
-- [ ] Honour the `gpu` configuration section
-
-  `gpu.device` and `gpu.memory_limit_mb` are validated on load and then never
-  read, so setting them changes nothing. Either pass them to the voice and
-  image providers or remove them. The same is true of `assets_dir`, the
-  `cache` section, and `temp.max_age_hours`.
-
-- [ ] Decide where relative `[paths]` values resolve from for an installed
-      copy, which currently must use absolute paths
+  `assets_dir`, the `cache` section, and `temp.max_age_hours` are parsed on
+  load and never read. The example configuration says so, which is honest but
+  not a substitute for deciding.
 
 ---
 
@@ -98,4 +90,13 @@ narrated, subtitled MP4 entirely on local infrastructure.
   the wall clock unchanged. Genuine batching would need one prompt to produce
   several different images, which the workflow format does not express, or a
   second ComfyUI instance, which does not fit alongside SDXL on 8 GB of VRAM.
-  Overlapping narration with image generation, above, is the achievable win.
+
+- Overlapping narration with image generation
+
+  Built and measured, then removed. The two stages are genuinely independent
+  and did run together, starting 4 milliseconds apart, but image generation
+  went from 351 to 443 seconds because the CPU-only voice model contends with
+  ComfyUI staging SDXL through 16 GB of RAM. The gain was about 4 percent
+  against the 110 seconds predicted, which does not pay for a worker thread in
+  the core workflow. Pull request 1 has the per-scene numbers. Worth revisiting
+  on a machine with more memory, or with the voice model on the GPU.
