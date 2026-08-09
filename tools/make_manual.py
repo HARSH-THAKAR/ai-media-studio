@@ -542,6 +542,25 @@ story.append(note(
     "storyboard exactly."
 ))
 story.append(Spacer(1, 3 * mm))
+story.append(Paragraph("The opening line", H2))
+story.append(para(
+    "The script writer names a hook for the opening seconds. It leads the first "
+    "scene's narration, so it is spoken and captioned like any other line. The "
+    "merge happens once, before the storyboard is saved, so resuming a run does "
+    "not speak it twice, and a hook the model already used as its opening line is "
+    "left alone rather than repeated."
+))
+story.append(para(
+    "A model asked only for a hook writes atmospheric scene setting, so the script "
+    "prompt says what the hook is for: one sentence, at most twelve words, stating "
+    "a fact, question or claim rather than describing the view."
+))
+story.append(note(
+    "<b>Read the opening line before you publish.</b> The prompt asks for an accurate "
+    "hook and the model still occasionally overstates one, because nothing checks a "
+    "claim against reality. Automatic fact checking is not built yet."
+))
+story.append(Spacer(1, 3 * mm))
 story.append(Paragraph("Subtitles", H2))
 story.append(para(
     "Captions follow the narration word by word rather than showing a whole scene's "

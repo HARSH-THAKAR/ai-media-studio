@@ -215,6 +215,7 @@ class ReelWorkflow:
                 storyboard = self._llm_provider.generate_script(request.topic, style)
         except Exception as error:
             return self._failure(request, project, started_at, "storyboard", error)
+        storyboard = _spoken_storyboard(storyboard)
         try:
             self._project_store.save_storyboard(project, storyboard)
         except OSError as error:
@@ -387,6 +388,37 @@ def _persistence_failure(
         Path(),
         error,
     )
+
+
+def _spoken_storyboard(storyboard: ScriptResult) -> ScriptResult:
+    """Open the narration with the hook the storyboard asked for.
+
+    A storyboard names a hook for the opening line and nothing ever spoke it:
+    only scene narration reaches the voice, so the hook was written down and
+    discarded. Short-form video is decided in its first seconds, which made
+    that the most expensive line in the script to be throwing away.
+
+    It leads the first scene rather than becoming a scene of its own, so the
+    narration, its measured timing, the captions and the render all continue to
+    work per scene with nothing new to reason about.
+
+    This runs once, before the storyboard is persisted, so a resumed run reads
+    back narration that already opens with the hook and cannot prepend it again.
+    """
+    hook = storyboard.hook.strip()
+    if not hook or not storyboard.scenes:
+        return storyboard
+    first = storyboard.scenes[0]
+    narration = first.narration.strip()
+    if narration.casefold().startswith(hook.casefold()):
+        # The model already opened with it, which it often does.
+        return storyboard
+    if hook[-1] not in ".!?":
+        # Kokoro and the caption splitter both work in sentences, so the hook
+        # has to end like one or it runs into the first line of narration.
+        hook = f"{hook}."
+    spoken = replace(first, narration=f"{hook} {narration}".strip())
+    return replace(storyboard, scenes=(spoken, *storyboard.scenes[1:]))
 
 
 def _is_present(artifact_path: Path) -> bool:
