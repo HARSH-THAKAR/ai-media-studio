@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 import json
 from pathlib import Path
@@ -96,6 +97,44 @@ class _UnusableVoiceProvider:
         raise AssertionError("Resume regenerated the narration.")
 
 
+class _Rendezvous:
+    """Providers that each wait for the other, proving they run together.
+
+    If narration and images ran one after the other, whichever started first
+    would wait out its timeout and the test would fail.
+    """
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self.voice_started = threading.Event()
+        self.image_started = threading.Event()
+        self.voice_saw_images = False
+        self.images_saw_voice = False
+        self._timeout = timeout
+
+    def generate_voice(
+        self,
+        storyboard: ScriptResult,
+        output_path: Path | None = None,
+        voice: str | None = None,
+    ) -> VoiceResult:
+        """Signal that narration began, then wait for image generation."""
+        del voice
+        assert output_path is not None
+        self.voice_started.set()
+        self.voice_saw_images = self.image_started.wait(self._timeout)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"audio")
+        return VoiceResult(output_path, 4.0, 0.1, "test", None, 24_000, scene_durations=(2.0, 2.0))
+
+    def generate_image(self, scene: Scene, output_path: Path) -> ImageResult:
+        """Signal that image generation began, then wait for narration."""
+        self.image_started.set()
+        self.images_saw_voice = self.voice_started.wait(self._timeout)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"image")
+        return ImageResult(scene.order, output_path, "test", 0.1, 1)
+
+
 class ReelWorkflowTests(unittest.TestCase):
     """Verify sequential provider orchestration and structured failures."""
 
@@ -165,6 +204,21 @@ class ReelWorkflowTests(unittest.TestCase):
 
             result = workflow.generate("Why Japan Never Sleeps")
 
+        self.assertEqual([scene.duration for scene in result.storyboard.scenes], [2.0, 2.0])
+
+    def test_narration_and_images_run_at_the_same_time(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            rendezvous = _Rendezvous()
+            workflow = ReelWorkflow(
+                FakeLlmProvider(), rendezvous, rendezvous, Path(directory),
+            )
+
+            result = workflow.generate("Why Japan Never Sleeps")
+
+        self.assertTrue(result.is_success)
+        self.assertTrue(rendezvous.voice_saw_images, "narration did not overlap images")
+        self.assertTrue(rendezvous.images_saw_voice, "images did not overlap narration")
+        self.assertEqual(len(result.image_results), 2)
         self.assertEqual([scene.duration for scene in result.storyboard.scenes], [2.0, 2.0])
 
     def test_resume_regenerates_only_the_missing_images(self) -> None:
