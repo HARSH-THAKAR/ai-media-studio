@@ -73,11 +73,18 @@ Phases 1 and 2 are finished and the known defects are cleared. What remains is
 Phase 3 and beyond in [ROADMAP.md](ROADMAP.md): automatic research and fact
 checking, then a web dashboard, then scheduled uploading.
 
-- [ ] Implement, or remove, the settings that are still only validated
+- [x] Implement, or remove, the settings that are still only validated
 
-  `assets_dir`, the `cache` section, and `temp.max_age_hours` are parsed on
-  load and never read. The example configuration says so, which is honest but
-  not a substitute for deciding.
+  `assets_dir`, the `cache` section, and `temp.max_age_hours` were parsed on
+  load and never read. Removed rather than implemented: nothing in the pipeline
+  wanted them, and a setting that does nothing is worse than a missing feature
+  because it reads as one that works. A settings file still carrying them keeps
+  loading, since unknown keys are ignored.
+
+  `paths.temp_dir` is the same shape and was left alone. Nothing writes to it
+  either, but it is created on startup, so removing it is a decision about
+  whether the application should have scratch space at all rather than a
+  cleanup.
 
 ---
 
