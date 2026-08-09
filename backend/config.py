@@ -22,7 +22,6 @@ class PathSettings:
     """Filesystem locations used by the application."""
 
     base_dir: Path
-    assets_dir: Path
     output_dir: Path
     temp_dir: Path
     ffmpeg_executable: str
@@ -89,15 +88,6 @@ class LoggingSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class CacheSettings:
-    """Settings reserved for local generated-asset caching."""
-
-    enabled: bool
-    directory: Path
-    max_size_mb: int
-
-
-@dataclass(frozen=True, slots=True)
 class MusicSettings:
     """Local background music selection and mixing settings."""
 
@@ -105,13 +95,6 @@ class MusicSettings:
     volume: float
     fade_duration_seconds: float
     ducking_ratio: float
-
-
-@dataclass(frozen=True, slots=True)
-class TempSettings:
-    """Retention policy for temporary generated artifacts."""
-
-    max_age_hours: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,9 +138,7 @@ class Settings:
     config_version: int
     debug: bool
     logging: LoggingSettings
-    cache: CacheSettings
     music: MusicSettings
-    temp: TempSettings
     gpu: GpuSettings
     subtitles: SubtitleSettings
     svd: SvdSettings
@@ -171,7 +152,6 @@ class Settings:
         """Create directories used for generated and temporary artifacts."""
         self.paths.output_dir.mkdir(parents=True, exist_ok=True)
         self.paths.temp_dir.mkdir(parents=True, exist_ok=True)
-        self.cache.directory.mkdir(parents=True, exist_ok=True)
 
 
 def load_settings(
@@ -256,9 +236,6 @@ def _apply_environment_overrides(
         "AI_MEDIA_LOG_CONSOLE_ENABLED": ("logging", "console_enabled"),
         "AI_MEDIA_LOG_FILE_ENABLED": ("logging", "file_enabled"),
         "AI_MEDIA_LOG_DIRECTORY": ("logging", "directory"),
-        "AI_MEDIA_CACHE_ENABLED": ("cache", "enabled"),
-        "AI_MEDIA_CACHE_DIRECTORY": ("cache", "directory"),
-        "AI_MEDIA_TEMP_MAX_AGE_HOURS": ("temp", "max_age_hours"),
         "AI_MEDIA_GPU_DEVICE": ("gpu", "device"),
     }
     for variable, (section, key) in overrides.items():
@@ -277,9 +254,7 @@ def _build_settings(raw: dict[str, object], base_dir: Path) -> Settings:
         config_version=_config_version(raw),
         debug=_optional_bool(raw, "debug", False),
         logging=_build_logging(_optional_section(raw, "logging"), base_dir),
-        cache=_build_cache(_optional_section(raw, "cache"), base_dir),
         music=_build_music(_optional_section(raw, "music"), base_dir),
-        temp=_build_temp(_optional_section(raw, "temp")),
         gpu=_build_gpu(_optional_section(raw, "gpu")),
         subtitles=_build_subtitles(_optional_section(raw, "subtitles")),
         svd=_build_svd(_optional_section(raw, "svd"), base_dir),
@@ -294,7 +269,6 @@ def _build_settings(raw: dict[str, object], base_dir: Path) -> Settings:
 def _build_paths(values: dict[str, object], base_dir: Path) -> PathSettings:
     return PathSettings(
         base_dir=base_dir,
-        assets_dir=_resolve_path(values, "assets_dir", base_dir),
         output_dir=_resolve_path(values, "output_dir", base_dir),
         temp_dir=_resolve_path(values, "temp_dir", base_dir),
         ffmpeg_executable=_resolve_executable(values, base_dir),
@@ -391,14 +365,6 @@ def _build_logging(
     )
 
 
-def _build_cache(values: dict[str, object], base_dir: Path) -> CacheSettings:
-    return CacheSettings(
-        enabled=_optional_bool(values, "enabled", True),
-        directory=_optional_path(values, "directory", "cache", base_dir),
-        max_size_mb=_optional_positive_integer(values, "max_size_mb", 1_024),
-    )
-
-
 def _build_music(values: dict[str, object], base_dir: Path) -> MusicSettings:
     return MusicSettings(
         directory=_optional_path(values, "directory", "music", base_dir),
@@ -407,12 +373,6 @@ def _build_music(values: dict[str, object], base_dir: Path) -> MusicSettings:
             values, "fade_duration_seconds", 1.0,
         ),
         ducking_ratio=_optional_positive_float(values, "ducking_ratio", 6.0),
-    )
-
-
-def _build_temp(values: dict[str, object]) -> TempSettings:
-    return TempSettings(
-        max_age_hours=_optional_positive_integer(values, "max_age_hours", 24),
     )
 
 

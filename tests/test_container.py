@@ -49,7 +49,6 @@ def _load_test_settings() -> Settings:
 def _test_config() -> str:
     return """
 [paths]
-assets_dir = "assets"
 output_dir = "output"
 temp_dir = "temp"
 ffmpeg_executable = "ffmpeg"
