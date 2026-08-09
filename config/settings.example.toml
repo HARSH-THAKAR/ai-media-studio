@@ -58,6 +58,13 @@ filename = "ai_media_studio.log"
 max_bytes = 5000000
 backup_count = 3
 
+[subtitles]
+# Subtitles follow the narration word by word, using timings measured while the
+# speech is synthesized. This is the longest caption shown at once; sentences
+# are divided into cues of roughly equal length so none is left holding a
+# single word.
+max_characters_per_cue = 32
+
 # Reserved for generated-asset caching, which is not implemented yet. These
 # values are validated on load but nothing reads them.
 [cache]

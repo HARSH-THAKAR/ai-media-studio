@@ -124,6 +124,15 @@ class ImageResult:
 
 
 @dataclass(frozen=True, slots=True)
+class WordTiming:
+    """One spoken word and when it is heard within the narration."""
+
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
 class VoiceResult:
     """Result returned when a voice provider generates narration audio."""
 
@@ -135,6 +144,7 @@ class VoiceResult:
     sample_rate: int
     error: ProviderError | None = None
     scene_durations: tuple[float, ...] = ()
+    word_timings: tuple[WordTiming, ...] = ()
 
     @property
     def is_success(self) -> bool:
