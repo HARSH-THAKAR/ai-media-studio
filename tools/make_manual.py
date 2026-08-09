@@ -674,12 +674,19 @@ story.append(para(
     "model follows far better than a total for the whole script."
 ))
 story.append(para(
-    "Asking is not enough on its own, so the result is checked. How long a script "
-    "takes to speak is known from its word count, which costs nothing to work out, "
-    "so a script that would run too long or too short is thrown away and asked for "
-    "again, up to three times, keeping the closest attempt. Nothing is narrated or "
-    "illustrated until the length fits, so a miss costs one model call rather than a "
-    "whole run."
+    "Asking is not enough on its own, so the result is checked twice. A script's "
+    "spoken length is first estimated from its word count, which costs nothing to "
+    "work out, and one that would run too long or too short is asked for again, up "
+    "to three times. That estimate counts the hook, which is spoken, and subtracts "
+    "the silence left after each scene, which is part of the finished length."
+))
+story.append(para(
+    "An estimate is still an estimate, because how fast a voice speaks depends on "
+    "the words: two real narrations measured 2.23 and 1.98 words a second. So the "
+    "finished narration is measured against the target as well, and a script that "
+    "missed is rewritten at the rate the voice just demonstrated and spoken again. "
+    "Narration costs a fraction of the images and clips that follow it, so paying "
+    "for it twice is far cheaper than illustrating a video of the wrong length."
 ))
 story.append(note(
     "Leave it at <b>0</b>, the default, and a script runs to whatever length it wants. "
