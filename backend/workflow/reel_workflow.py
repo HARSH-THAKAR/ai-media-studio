@@ -18,6 +18,7 @@ from backend.providers.contracts import (
     VideoClipProvider,
     VoiceProvider,
     VoiceResult,
+    WordTiming,
 )
 from backend.workflow.models import (
     GeneratedAsset,
@@ -90,7 +91,9 @@ class ReelWorkflow:
             )
         request = WorkflowRequest(storyboard.topic, project.project_dir.name)
         self._logger.info("Resuming reel workflow for topic '%s'.", request.topic)
-        existing = _existing_narration(project, storyboard)
+        existing = _existing_narration(
+            project, storyboard, self._project_store.load_word_timings(project),
+        )
         if existing is None:
             generated = self._generate_voice(request, started_at, project, storyboard, voice)
             if isinstance(generated, WorkflowResult):
@@ -243,6 +246,12 @@ class ReelWorkflow:
         if not voice_result.is_success or voice_result.artifact_path is None:
             error = voice_result.error or ProviderError("missing_artifact", "Voice provider returned no artifact.", False)
             return self._failure(request, project, started_at, "voice", error, storyboard, voice_result)
+        try:
+            self._project_store.save_word_timings(project, voice_result.word_timings)
+        except OSError:
+            # Captions fall back to one cue per scene on a later resume, which
+            # is worse than losing the run this far in.
+            self._logger.exception("Unable to persist narration word timings.")
         return voice_result
 
     def _reconcile_scene_durations(
@@ -389,12 +398,16 @@ def _is_present(artifact_path: Path) -> bool:
 
 
 def _existing_narration(
-    project: ProjectPaths, storyboard: ScriptResult,
+    project: ProjectPaths,
+    storyboard: ScriptResult,
+    word_timings: tuple[WordTiming, ...] = (),
 ) -> VoiceResult | None:
     """Describe already-generated narration, or nothing when it is absent.
 
     A persisted storyboard is only written back with reconciled durations once
-    narration exists, so its scene durations are the measured ones.
+    narration exists, so its scene durations are the measured ones. The word
+    timings come from disk for the same reason: only the provider that spoke
+    the script could measure them, and it is not being asked to speak again.
     """
     if not _is_present(project.narration_path):
         return None
@@ -407,6 +420,7 @@ def _existing_narration(
         None,
         0,
         scene_durations=scene_durations,
+        word_timings=word_timings,
     )
 
 

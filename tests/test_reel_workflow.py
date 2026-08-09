@@ -14,6 +14,7 @@ from backend.providers.contracts import (
     Scene,
     ScriptResult,
     VoiceResult,
+    WordTiming,
 )
 from backend.workflow.reel_workflow import ReelWorkflow
 
@@ -34,9 +35,14 @@ class FakeLlmProvider:
 class FakeVoiceProvider:
     """Write one test narration artifact."""
 
-    def __init__(self, scene_durations: tuple[float, ...] = ()) -> None:
-        """Optionally report measured per-scene narration durations."""
+    def __init__(
+        self,
+        scene_durations: tuple[float, ...] = (),
+        word_timings: tuple[WordTiming, ...] = (),
+    ) -> None:
+        """Optionally report measured per-scene durations and word timings."""
         self._scene_durations = scene_durations
+        self._word_timings = word_timings
 
     def generate_voice(
         self,
@@ -52,6 +58,7 @@ class FakeVoiceProvider:
         return VoiceResult(
             output_path, 4.0, 0.1, "test", None, 24_000,
             scene_durations=self._scene_durations,
+            word_timings=self._word_timings,
         )
 
 
@@ -288,6 +295,51 @@ class ReelWorkflowTests(unittest.TestCase):
         self.assertEqual(images.generated, [2])
         self.assertEqual([scene.duration for scene in resumed.storyboard.scenes], [3.0, 4.0])
         self.assertEqual(len(resumed.image_results), 2)
+
+    def test_resume_keeps_the_word_timings_captions_are_built_from(self) -> None:
+        timings = (
+            WordTiming("First", 0.0, 0.5),
+            WordTiming("scene.", 0.5, 1.2),
+            WordTiming("Second", 3.0, 3.6),
+            WordTiming("scene.", 3.6, 4.0),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            first = ReelWorkflow(
+                FakeLlmProvider(),
+                FakeVoiceProvider((3.0, 4.0), timings),
+                FakeImageProvider(2),
+                output_dir,
+            ).generate("Why Japan Never Sleeps")
+
+            resumed = ReelWorkflow(
+                _UnusableLlmProvider(), _UnusableVoiceProvider(),
+                FakeImageProvider(), output_dir,
+            ).resume(first.project_path)
+
+        self.assertTrue(resumed.is_success)
+        # Only the provider that spoke the script can measure these, and it is
+        # not asked to speak again. Losing them silently drops captions back to
+        # one cue per scene, which is a paragraph on screen at a time.
+        self.assertEqual(resumed.voice_result.word_timings, timings)
+
+    def test_resume_without_recorded_timings_still_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            first = ReelWorkflow(
+                FakeLlmProvider(), FakeVoiceProvider((3.0, 4.0)), FakeImageProvider(2),
+                output_dir,
+            ).generate("Why Japan Never Sleeps")
+
+            resumed = ReelWorkflow(
+                _UnusableLlmProvider(), _UnusableVoiceProvider(),
+                FakeImageProvider(), output_dir,
+            ).resume(first.project_path)
+
+        # A project generated before timings were recorded has none, and falls
+        # back to one cue per scene exactly as it did then.
+        self.assertTrue(resumed.is_success)
+        self.assertEqual(resumed.voice_result.word_timings, ())
 
     def test_resume_reports_a_missing_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

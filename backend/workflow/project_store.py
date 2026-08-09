@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.providers.contracts import Scene, ScriptResult
+from backend.providers.contracts import Scene, ScriptResult, WordTiming
 from backend.workflow.models import WorkflowResult
 
 
@@ -25,6 +25,7 @@ class ProjectPaths:
     manifest_path: Path
     storyboard_path: Path
     narration_path: Path
+    word_timings_path: Path
     images_dir: Path
     video_dir: Path
     logs_dir: Path
@@ -72,6 +73,40 @@ class ProjectStore:
         """Persist the canonical storyboard document as JSON."""
         _write_json(paths.storyboard_path, asdict(storyboard))
 
+    def save_word_timings(
+        self, paths: ProjectPaths, word_timings: tuple[WordTiming, ...],
+    ) -> None:
+        """Persist when each narrated word is spoken.
+
+        Only the voice provider that synthesized the speech knows this, so a
+        resumed run reusing narration from disk cannot measure it again without
+        speaking the whole script a second time. Writing it down keeps captions
+        following the narration word by word across a resume.
+        """
+        if not word_timings:
+            return
+        _write_json(paths.word_timings_path, [asdict(timing) for timing in word_timings])
+
+    def load_word_timings(self, paths: ProjectPaths) -> tuple[WordTiming, ...]:
+        """Read persisted word timings, or nothing when they are unavailable.
+
+        A project generated before these were recorded simply has none, and
+        captions fall back to one cue per scene as they did then.
+        """
+        try:
+            data = json.loads(paths.word_timings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ()
+        if not isinstance(data, list):
+            return ()
+        try:
+            return tuple(
+                WordTiming(str(item["text"]), float(item["start"]), float(item["end"]))
+                for item in data
+            )
+        except (KeyError, TypeError, ValueError):
+            return ()
+
     def save_manifest(self, paths: ProjectPaths, result: WorkflowResult) -> None:
         """Persist terminal workflow state as the canonical project manifest."""
         _write_json(paths.manifest_path, _manifest(paths, result))
@@ -97,6 +132,7 @@ def _project_paths(project_dir: Path, timestamp: datetime) -> ProjectPaths:
         project_dir / "manifest.json",
         project_dir / "storyboard.json",
         project_dir / "narration.wav",
+        project_dir / "word_timings.json",
         project_dir / "images",
         project_dir / "video",
         project_dir / "logs",
