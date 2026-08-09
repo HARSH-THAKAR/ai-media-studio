@@ -191,6 +191,12 @@ Each scene can set `camera_motion` to `none`, `zoom_in`, `zoom_out`, `pan`,
 `pan_left`, or `pan_right`. Scene transitions are selected from scene metadata;
 the default transition overlap is controlled by `video.transition_duration_seconds`.
 
+Language models overwhelmingly choose `none`, which leaves every image frozen
+on screen. Scenes asking for no motion are therefore given one anyway,
+alternating between zoom and pan so consecutive scenes differ. Set
+`video.animate_still_scenes = false` to honour the storyboard exactly, and
+`video.camera_motion_strength` to control how far a movement travels.
+
 ## License
 
 Released under the MIT License. See [LICENSE](LICENSE).
