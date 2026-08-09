@@ -61,8 +61,7 @@ def _build_background_music_provider(settings: Settings) -> BackgroundMusicProvi
 
 
 def _build_subtitle_provider(settings: Settings) -> SubtitleProvider:
-    del settings
-    return SrtSubtitleProvider()
+    return SrtSubtitleProvider(settings.subtitles)
 
 
 def _build_production_workflow(

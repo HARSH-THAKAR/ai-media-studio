@@ -114,6 +114,13 @@ class TempSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SubtitleSettings:
+    """How narration is split into individual subtitle cues."""
+
+    max_characters_per_cue: int = 32
+
+
+@dataclass(frozen=True, slots=True)
 class GpuSettings:
     """Device selection for AI models that run inside this process."""
 
@@ -131,6 +138,7 @@ class Settings:
     music: MusicSettings
     temp: TempSettings
     gpu: GpuSettings
+    subtitles: SubtitleSettings
     paths: PathSettings
     ollama: OllamaSettings
     comfyui: ComfyUiSettings
@@ -251,6 +259,7 @@ def _build_settings(raw: dict[str, object], base_dir: Path) -> Settings:
         music=_build_music(_optional_section(raw, "music"), base_dir),
         temp=_build_temp(_optional_section(raw, "temp")),
         gpu=_build_gpu(_optional_section(raw, "gpu")),
+        subtitles=_build_subtitles(_optional_section(raw, "subtitles")),
         paths=paths,
         ollama=ollama,
         comfyui=comfyui,
@@ -378,6 +387,14 @@ def _build_gpu(values: dict[str, object]) -> GpuSettings:
     if device not in {"auto", "cpu", "cuda"}:
         raise ConfigurationError("Configuration value 'gpu.device' is invalid.")
     return GpuSettings(device=device)
+
+
+def _build_subtitles(values: dict[str, object]) -> SubtitleSettings:
+    return SubtitleSettings(
+        max_characters_per_cue=_optional_positive_integer(
+            values, "max_characters_per_cue", 32,
+        ),
+    )
 
 
 def _section(settings: dict[str, object], name: str) -> dict[str, object]:

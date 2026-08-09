@@ -185,6 +185,17 @@ Place supported local audio files (`.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, or
 one track at random. Pass its successful result to `VideoRenderer` to loop,
 fade, and duck the track beneath narration.
 
+## Subtitles
+
+Captions follow the narration word by word rather than showing a whole scene's
+text at once. The voice provider reports when each word is spoken, measured
+while the speech is synthesized, and those timings drive the cues. Sentences are
+divided into cues of roughly equal length, controlled by
+`subtitles.max_characters_per_cue`, and each cue stays on screen until the next
+begins so captions never blink out mid-sentence.
+
+A voice provider that reports no word timings falls back to one cue per scene.
+
 ## Scene motion and transitions
 
 Each scene can set `camera_motion` to `none`, `zoom_in`, `zoom_out`, `pan`,
