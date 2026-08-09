@@ -2,6 +2,22 @@
 
 AI Media Studio is a fully local AI-powered content creation platform that automatically generates short-form videos for platforms like Instagram Reels, YouTube Shorts, and TikTok.
 
+One topic in, one finished 1080x1920 MP4 out: researched and scripted, narrated,
+illustrated scene by scene, subtitled, and rendered. Nothing leaves the machine.
+
+## Status
+
+Version 0.1.0. The pipeline works end to end and produces finished videos.
+
+- Working: script and scene planning, narration, per-scene image generation,
+  subtitles, background music, transitions and camera motion, rendering, and
+  resuming an interrupted run.
+- Not started: automatic research and fact checking, a web dashboard, and
+  scheduled uploading. See [ROADMAP.md](ROADMAP.md).
+
+New here? [USER_MANUAL.pdf](USER_MANUAL.pdf) covers installation, configuration,
+and troubleshooting.
+
 ## Goals
 
 - Fully local execution
@@ -156,3 +172,7 @@ fade, and duck the track beneath narration.
 Each scene can set `camera_motion` to `none`, `zoom_in`, `zoom_out`, `pan`,
 `pan_left`, or `pan_right`. Scene transitions are selected from scene metadata;
 the default transition overlap is controlled by `video.transition_duration_seconds`.
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE).
