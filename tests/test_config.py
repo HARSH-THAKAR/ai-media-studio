@@ -46,7 +46,7 @@ class LoadSettingsTests(unittest.TestCase):
 
     def test_ignores_settings_that_were_retired(self) -> None:
         retired = _valid_config().replace(
-            "[paths]", '[paths]\nassets_dir = "assets"',
+            "[paths]", '[paths]\nassets_dir = "assets"\ntemp_dir = "temp"',
         ) + """
 [cache]
 enabled = true
@@ -69,6 +69,7 @@ max_age_hours = 12
         self.assertFalse(hasattr(settings, "cache"))
         self.assertFalse(hasattr(settings, "temp"))
         self.assertFalse(hasattr(settings.paths, "assets_dir"))
+        self.assertFalse(hasattr(settings.paths, "temp_dir"))
 
     def test_selects_how_clips_are_smoothed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -153,7 +154,6 @@ max_age_hours = 12
 
         self.assertEqual(settings.paths.base_dir, studio)
         self.assertEqual(settings.paths.output_dir, studio / "output")
-        self.assertEqual(settings.paths.temp_dir, studio / "temp")
         self.assertEqual(settings.music.directory, studio / "music")
         self.assertEqual(settings.logging.directory, studio / "logs")
         self.assertEqual(settings.comfyui.workflow_path, studio / "config" / "workflow.json")
@@ -197,7 +197,6 @@ def _valid_config() -> str:
     return """
 [paths]
 output_dir = "output"
-temp_dir = "temp"
 ffmpeg_executable = "ffmpeg"
 
 [ollama]

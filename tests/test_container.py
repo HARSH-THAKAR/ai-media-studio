@@ -50,7 +50,6 @@ def _test_config() -> str:
     return """
 [paths]
 output_dir = "output"
-temp_dir = "temp"
 ffmpeg_executable = "ffmpeg"
 
 [ollama]

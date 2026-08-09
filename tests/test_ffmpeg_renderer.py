@@ -544,7 +544,7 @@ def _workflow_result(
 
 
 def _paths(root: Path, executable: str) -> PathSettings:
-    return PathSettings(root, root, root, executable)
+    return PathSettings(root, root, executable)
 
 
 def _video_settings() -> VideoSettings:
