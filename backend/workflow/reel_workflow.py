@@ -9,11 +9,13 @@ from uuid import uuid4
 
 from backend.logging_setup import get_logger
 from backend.providers.contracts import (
+    ClipResult,
     ImageProvider,
     ImageResult,
     LLMProvider,
     ProviderError,
     ScriptResult,
+    VideoClipProvider,
     VoiceProvider,
     VoiceResult,
 )
@@ -40,11 +42,13 @@ class ReelWorkflow:
         image_provider: ImageProvider,
         output_dir: Path,
         project_store: ProjectStore | None = None,
+        clip_provider: VideoClipProvider | None = None,
     ) -> None:
         """Initialize the workflow with provider interfaces and project storage."""
         self._llm_provider = llm_provider
         self._voice_provider = voice_provider
         self._image_provider = image_provider
+        self._clip_provider = clip_provider
         self._project_store = project_store or ProjectStore(output_dir)
         self._logger = get_logger("workflow.reel")
 
@@ -117,13 +121,73 @@ class ReelWorkflow:
             if result.artifact_path is not None
         )
         failure = next((item for item in image_results if not item.is_success), None)
+        clip_results: tuple[ClipResult, ...] = ()
+        if failure is None:
+            clip_results = self._generate_clips(project, storyboard, image_results)
+            assets.extend(
+                GeneratedAsset("clip", result.artifact_path, result.scene_order)
+                for result in clip_results
+                if result.artifact_path is not None
+            )
+            failure = next((item for item in clip_results if not item.is_success), None)
         if failure is not None:
+            stage = "clip" if isinstance(failure, ClipResult) else "image"
             return self._finish(
                 request, project, started_at, storyboard, voice_result, image_results, assets,
-                WorkflowError("image", _error_message(failure.error), failure.error),
+                WorkflowError(stage, _error_message(failure.error), failure.error),
+                clip_results,
             )
         self._logger.info("Completed reel workflow for topic '%s'.", request.topic)
-        return self._finish(request, project, started_at, storyboard, voice_result, image_results, assets)
+        return self._finish(
+            request, project, started_at, storyboard, voice_result, image_results, assets,
+            None, clip_results,
+        )
+
+    def _generate_clips(
+        self,
+        project: ProjectPaths,
+        storyboard: ScriptResult,
+        image_results: tuple[ImageResult, ...],
+    ) -> tuple[ClipResult, ...]:
+        """Animate each scene image, when a clip provider is configured.
+
+        Clips are the most expensive artifact in a run, so one already on disk
+        is reused exactly as a generated image is.
+        """
+        if self._clip_provider is None:
+            return ()
+        images = {result.scene_order: result.artifact_path for result in image_results}
+        clips_dir = project.project_dir / "clips"
+        results: list[ClipResult] = []
+        for scene in storyboard.scenes:
+            image_path = images.get(scene.order)
+            if image_path is None:
+                continue
+            clip_path = clips_dir / f"scene_{scene.order:03d}.webm"
+            if _is_present(clip_path):
+                self._logger.info("Reusing existing clip for scene %d.", scene.order)
+                # A renderer stretches a clip across its scene, so a reused one
+                # has to report its length just as a freshly generated one does.
+                results.append(
+                    ClipResult(
+                        scene.order, clip_path, "reused", 0.0, 0,
+                        clip_seconds=self._clip_provider.clip_seconds,
+                    ),
+                )
+                continue
+            self._logger.info("Animating scene %d.", scene.order)
+            try:
+                result = self._clip_provider.generate_clip(scene, image_path, clip_path)
+            except Exception as error:
+                self._logger.exception("Clip provider raised for scene %d.", scene.order)
+                result = ClipResult(
+                    scene.order, None, "unknown", 0.0, 1,
+                    ProviderError("provider_exception", str(error), False),
+                )
+            results.append(result)
+            if not result.is_success:
+                break
+        return tuple(results)
 
     def _create_project(self, topic: str) -> tuple[ProjectPaths | None, WorkflowRequest]:
         normalized_topic = topic.strip()
@@ -270,6 +334,7 @@ class ReelWorkflow:
         image_results: tuple[ImageResult, ...],
         assets: list[GeneratedAsset] | tuple[GeneratedAsset, ...],
         error: WorkflowError | None = None,
+        clip_results: tuple[ClipResult, ...] = (),
     ) -> WorkflowResult:
         result = WorkflowResult(
             request,
@@ -280,6 +345,7 @@ class ReelWorkflow:
             _metrics(started_at, storyboard, voice_result, image_results),
             project.project_dir,
             error,
+            clip_results,
         )
         try:
             self._project_store.save_manifest(project, result)

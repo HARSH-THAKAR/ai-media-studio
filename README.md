@@ -185,6 +185,41 @@ Place supported local audio files (`.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, or
 one track at random. Pass its successful result to `VideoRenderer` to loop,
 fade, and duck the track beneath narration.
 
+## Animating scenes with Stable Video Diffusion
+
+By default each scene is a still image with a slow pan or zoom over it. Set
+`svd.enabled = true` to animate the picture itself, so people move, rain falls,
+and lights flicker.
+
+This needs an SVD checkpoint in ComfyUI's `models/checkpoints` folder, named by
+`config/svd_workflow.json`:
+
+```powershell
+huggingface-cli download stabilityai/stable-video-diffusion-img2vid-xt svd_xt.safetensors --local-dir comfyui\models\checkpoints
+```
+
+Each scene is generated twice: once as a still image, then again as a clip
+animating that image. Expect one to three minutes per scene on an 8 GB card, so
+a six-scene run takes roughly half an hour rather than eight minutes. Clips are
+saved under `clips/` in the project directory and reused when a run is resumed,
+because they are by far the most expensive artifact to produce.
+
+A clip runs `svd.frames / svd.fps` seconds, about four by default, while a scene
+lasts as long as its narration. Clips are therefore slowed to fill their scene.
+Camera motion is not applied to a scene that has a clip, since the picture
+already moves. A scene whose animation fails falls back to its still image.
+
+Slowing a clip that far spreads its twenty five frames very thinly: a ten second
+scene would hold each picture for four tenths of a second, which the eye reads as
+stuttering rather than slow motion. The frames in between are therefore
+synthesized, controlled by `video.clip_smoothing`:
+
+| Mode | Cost per scene | Result |
+| --- | --- | --- |
+| `blend` (default) | a few seconds | Each frame fades into the next. |
+| `motion` | about a minute | Movement between frames is followed, which is sharper when the clip has a clearly moving subject. Raise `video.render_timeout_seconds` to use it. |
+| `none` | none | Frames are repeated, which stutters. |
+
 ## Subtitles
 
 Captions follow the narration word by word rather than showing a whole scene's

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import wave
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
@@ -17,9 +18,40 @@ from backend.workflow.models import WorkflowResult
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
+
+@dataclass(frozen=True, slots=True)
+class _SceneSource:
+    """One scene's visual, either a still image or an animated clip."""
+
+    path: Path
+    clip_seconds: float | None
+
+    @property
+    def is_clip(self) -> bool:
+        """Return whether this scene is backed by a moving clip."""
+        return self.clip_seconds is not None and self.clip_seconds > 0
+
 # Applied in turn to scenes that ask for no camera motion, so a sequence of
 # them does not repeat the same movement.
 STILL_SCENE_MOTIONS = ("zoom_in", "pan_right", "zoom_out", "pan_left")
+
+# How a clip's missing frames are produced when it is stretched across a scene.
+# A generated clip holds only a couple of dozen frames, so repeating them to
+# fill a scene leaves each picture on screen for a third of a second, which
+# reads as stutter rather than slow motion. The first two synthesize the frames
+# in between instead: "motion" follows movement between frames, "blend" fades
+# one into the next for a fraction of the cost.
+CLIP_SMOOTHING_FILTERS = {
+    "motion": "minterpolate=fps={fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
+    "blend": "minterpolate=fps={fps}:mi_mode=blend",
+    "none": "fps={fps}",
+}
+
+# Interpolation only fills the gaps between real frames, so it stops short of
+# the last one and leaves the end of the scene unfilled. Cloning the clip's
+# final frame onto the source covers the shortfall. The padding is trimmed off
+# again, so none of it reaches the screen.
+CLIP_PADDING_FRACTION = 0.25
 
 # How far the narration and the scene timeline may drift apart before a render
 # is refused. A scene shorter than the minimum is stretched to reach it, so a
@@ -164,19 +196,29 @@ def _narration_seconds(narration: Path) -> float | None:
         return None
 
 
-def _ordered_images(workflow_result: WorkflowResult) -> tuple[Path, ...]:
+def _ordered_images(workflow_result: WorkflowResult) -> tuple[_SceneSource, ...]:
+    """Return each scene's visual, preferring an animated clip over a still."""
     storyboard = workflow_result.storyboard
     assert storyboard is not None
     by_scene = {result.scene_order: result for result in workflow_result.image_results}
-    paths: list[Path] = []
+    clips = {
+        result.scene_order: result
+        for result in workflow_result.clip_results
+        if result.is_success and result.artifact_path is not None
+    }
+    sources: list[_SceneSource] = []
     for scene in storyboard.scenes:
+        clip = clips.get(scene.order)
+        if clip is not None and clip.artifact_path.is_file():
+            sources.append(_SceneSource(clip.artifact_path, clip.clip_seconds))
+            continue
         result = by_scene.get(scene.order)
         if result is None or not result.is_success or result.artifact_path is None:
             raise ValueError(f"Scene {scene.order} has no successful image artifact.")
         if not result.artifact_path.is_file():
             raise ValueError(f"Image artifact for scene {scene.order} does not exist.")
-        paths.append(result.artifact_path)
-    return tuple(paths)
+        sources.append(_SceneSource(result.artifact_path, None))
+    return tuple(sources)
 
 
 def _resolve_executable(configured_executable: str) -> str:
@@ -208,18 +250,22 @@ def _render_command(
 ) -> tuple[list[str], float]:
     command = [executable, "-y"]
     overlaps = _scene_overlaps(scenes, settings)
-    for image, scene, overlap in zip(images, scenes, overlaps, strict=True):
+    for source, scene, overlap in zip(images, scenes, overlaps, strict=True):
+        if source.is_clip:
+            command.extend(["-i", str(source.path)])
+            continue
         command.extend(
             [
                 "-framerate", str(settings.frames_per_second), "-loop", "1",
-                "-t", str(scene.duration + overlap), "-i", str(image),
+                "-t", str(scene.duration + overlap), "-i", str(source.path),
             ],
         )
     command.extend(["-i", str(narration)])
     if music_path is not None:
         command.extend(["-stream_loop", "-1", "-i", str(music_path)])
     filter_graph, output_duration = _filter_graph(
-        scenes, settings, subtitle_path, music_path is not None, music_settings, overlaps,
+        scenes, settings, subtitle_path, music_path is not None, music_settings,
+        overlaps, images,
     )
     command.extend(
         [
@@ -250,9 +296,10 @@ def _filter_graph(
     has_music: bool,
     music_settings: MusicSettings,
     overlaps: tuple[float, ...],
+    sources: tuple[Path, ...],
 ) -> tuple[str, float]:
     video_filters = [
-        _scene_filter(index, scene, settings, overlap)
+        _scene_filter(index, scene, settings, overlap, sources[index])
         for index, (scene, overlap) in enumerate(zip(scenes, overlaps, strict=True))
     ]
     concat_filters, output_label, output_duration = _transition_filters(scenes, overlaps)
@@ -339,6 +386,62 @@ def _escape_filter_path(path: Path) -> str:
 
 
 def _scene_filter(
+    index: int,
+    scene: Scene,
+    settings: VideoSettings,
+    overlap: float,
+    source: _SceneSource,
+) -> str:
+    """Build the filter chain that turns one source into one scene."""
+    if source.is_clip:
+        return _clip_filter(index, scene, settings, overlap, source)
+    return _still_filter(index, scene, settings, overlap)
+
+
+def _clip_filter(
+    index: int,
+    scene: Scene,
+    settings: VideoSettings,
+    overlap: float,
+    source: _SceneSource,
+) -> str:
+    """Stretch an animated clip across its whole scene.
+
+    A generated clip is a few seconds long while a scene lasts as long as its
+    narration, so the clip is retimed to fill it. Slowing it that far spreads
+    its handful of frames thinly, so the frames in between are synthesized
+    rather than repeated. Camera motion is not applied, because the picture
+    already moves.
+    """
+    target = scene.duration + overlap
+    assert source.clip_seconds is not None
+    factor = round(target / source.clip_seconds, 6)
+    smoothing = CLIP_SMOOTHING_FILTERS[settings.clip_smoothing].format(
+        fps=settings.frames_per_second,
+    )
+    return (
+        f"[{index}:v]{_clip_padding(settings, source)}setpts=PTS*{factor},{smoothing},"
+        f"scale={settings.width}:{settings.height}:"
+        "force_original_aspect_ratio=increase,"
+        f"crop={settings.width}:{settings.height},setsar=1,"
+        f"trim=duration={target},setpts=PTS-STARTPTS,settb=AVTB[v{index}]"
+    )
+
+
+def _clip_padding(settings: VideoSettings, source: _SceneSource) -> str:
+    """Clone the clip's final frame so interpolation reaches the scene's end.
+
+    Repeating frames already fills a scene exactly, so only the interpolating
+    modes need this.
+    """
+    if settings.clip_smoothing == "none":
+        return ""
+    assert source.clip_seconds is not None
+    seconds = round(source.clip_seconds * CLIP_PADDING_FRACTION, 6)
+    return f"tpad=stop=-1:stop_mode=clone:stop_duration={seconds},"
+
+
+def _still_filter(
     index: int, scene: Scene, settings: VideoSettings, overlap: float,
 ) -> str:
     """Build the per-scene video filter chain.
