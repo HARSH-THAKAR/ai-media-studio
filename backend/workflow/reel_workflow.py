@@ -14,6 +14,7 @@ from backend.providers.contracts import (
     ImageResult,
     LLMProvider,
     ProviderError,
+    ScriptLength,
     ScriptResult,
     VideoClipProvider,
     VoiceProvider,
@@ -32,6 +33,14 @@ from backend.workflow.project_store import ProjectPaths, ProjectStore, ProjectSt
 
 MINIMUM_SCENE_DURATION_SECONDS = 1.0
 
+# How far the spoken narration may sit from a configured target before the
+# script is rewritten, and how many times to try. Narration costs a fraction of
+# the images and clips that follow, so paying for it twice beats illustrating a
+# video of the wrong length. One correction is enough, because the second
+# attempt uses the speaking rate the first one measured rather than an estimate.
+NARRATION_TOLERANCE = 0.15
+NARRATION_ATTEMPTS = 2
+
 
 class ReelWorkflow:
     """Coordinate provider contracts to generate and persist one reel project."""
@@ -44,12 +53,14 @@ class ReelWorkflow:
         output_dir: Path,
         project_store: ProjectStore | None = None,
         clip_provider: VideoClipProvider | None = None,
+        script_length: ScriptLength | None = None,
     ) -> None:
         """Initialize the workflow with provider interfaces and project storage."""
         self._llm_provider = llm_provider
         self._voice_provider = voice_provider
         self._image_provider = image_provider
         self._clip_provider = clip_provider
+        self._script_length = script_length
         self._project_store = project_store or ProjectStore(output_dir)
         self._logger = get_logger("workflow.reel")
 
@@ -62,12 +73,10 @@ class ReelWorkflow:
         if project is None:
             return _persistence_failure(request, started_at, "Unable to create project directory.")
         self._logger.info("Starting reel workflow for topic '%s'.", request.topic)
-        storyboard = self._generate_storyboard(request, started_at, project, style)
-        if isinstance(storyboard, WorkflowResult):
-            return storyboard
-        voice_result = self._generate_voice(request, started_at, project, storyboard, voice)
-        if isinstance(voice_result, WorkflowResult):
-            return voice_result
+        written = self._script_and_narration(request, started_at, project, style, voice)
+        if isinstance(written, WorkflowResult):
+            return written
+        storyboard, voice_result = written
         storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
         image_results = self._generate_images(project, storyboard)
         return self._finish_images(
@@ -200,19 +209,70 @@ class ReelWorkflow:
             return None, WorkflowRequest(normalized_topic, uuid4().hex)
         return project, WorkflowRequest(normalized_topic, project.project_dir.name)
 
+    def _script_and_narration(
+        self,
+        request: WorkflowRequest,
+        started_at: float,
+        project: ProjectPaths,
+        style: str | None,
+        voice: str | None,
+    ) -> tuple[ScriptResult, VoiceResult] | WorkflowResult:
+        """Write a script and speak it, correcting the length from what is heard.
+
+        How long a script takes to speak can only be estimated until the voice
+        has said it, and the estimate rests on a words-per-second figure that
+        moves with the writing: two real scripts measured 2.23 and 1.98. So the
+        narration is measured against the target, and a script that missed is
+        rewritten with the rate this voice just demonstrated on this material.
+
+        Narration costs a fraction of the images and clips that follow it, so
+        paying for it twice is far cheaper than illustrating a video of the
+        wrong length.
+        """
+        length = self._script_length
+        for attempt in range(1, NARRATION_ATTEMPTS + 1):
+            storyboard = self._generate_storyboard(request, started_at, project, style, length)
+            if isinstance(storyboard, WorkflowResult):
+                return storyboard
+            voice_result = self._generate_voice(request, started_at, project, storyboard, voice)
+            if isinstance(voice_result, WorkflowResult):
+                return voice_result
+            if length is None:
+                return storyboard, voice_result
+            spoken = voice_result.duration_seconds
+            miss = abs(spoken - length.target_seconds) / length.target_seconds
+            if miss <= NARRATION_TOLERANCE:
+                self._logger.info(
+                    "Narration runs %.2f seconds against a %.1f second target.",
+                    spoken, length.target_seconds,
+                )
+                return storyboard, voice_result
+            if attempt == NARRATION_ATTEMPTS:
+                self._logger.warning(
+                    "Narration runs %.2f seconds against a %.1f second target, "
+                    "%.0f%% out after %d attempts.",
+                    spoken, length.target_seconds, miss * 100, attempt,
+                )
+                return storyboard, voice_result
+            length = _recalibrated(length, storyboard, spoken)
+            self._logger.info(
+                "Narration ran %.2f seconds against a %.1f second target. "
+                "Rewriting at the %.2f words per second just measured.",
+                spoken, length.target_seconds, length.words_per_second,
+            )
+        raise AssertionError("Unreachable narration retry state.")
+
     def _generate_storyboard(
         self,
         request: WorkflowRequest,
         started_at: float,
         project: ProjectPaths,
         style: str | None,
+        length: ScriptLength | None = None,
     ) -> ScriptResult | WorkflowResult:
         self._logger.info("Generating storyboard.")
         try:
-            if style is None:
-                storyboard = self._llm_provider.generate_script(request.topic)
-            else:
-                storyboard = self._llm_provider.generate_script(request.topic, style)
+            storyboard = self._llm_provider.generate_script(request.topic, style, length)
         except Exception as error:
             return self._failure(request, project, started_at, "storyboard", error)
         storyboard = _spoken_storyboard(storyboard)
@@ -388,6 +448,22 @@ def _persistence_failure(
         Path(),
         error,
     )
+
+
+def _recalibrated(
+    length: ScriptLength, storyboard: ScriptResult, measured_seconds: float,
+) -> ScriptLength:
+    """Replace the assumed speaking rate with the one just measured.
+
+    Words per second depends on the words: a script about bioluminescence is
+    slower to say than one about cats. Rather than carry a constant that is
+    wrong for both, the next attempt uses the rate this narration demonstrated.
+    """
+    words = sum(len(scene.narration.split()) for scene in storyboard.scenes)
+    speech = measured_seconds - length.padding_seconds_per_scene * len(storyboard.scenes)
+    if words <= 0 or speech <= 0:
+        return length
+    return replace(length, words_per_second=words / speech)
 
 
 def _spoken_storyboard(storyboard: ScriptResult) -> ScriptResult:

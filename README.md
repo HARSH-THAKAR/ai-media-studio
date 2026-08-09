@@ -228,14 +228,25 @@ long. The same budget expressed per scene missed by a median of 18% but missed
 *consistently*, which is a bias rather than noise, so the budget asked for is
 raised to cancel it.
 
-What remains is caught rather than trusted. How long a script takes to speak is
-known from its word count alone, which costs nothing, so a script that would run
-too long or too short is thrown away and asked for again, up to three times,
-keeping the closest attempt. Nothing is narrated or illustrated until the length
-fits, so a miss costs one language model call rather than a run.
+What remains is caught rather than trusted, twice.
 
-Across ten live generations at 30 and 45 second targets, every script that
-parsed came in within 15% of its target.
+A script's spoken length is estimated from its word count, which costs nothing,
+so one that would run too long or too short is asked for again, up to three
+times, keeping the closest attempt. The estimate counts the hook, because the
+hook is spoken too, and subtracts the silence left after each scene, because that
+is part of the finished length.
+
+The estimate is still an estimate. It rests on a words-per-second figure that
+moves with the writing: two real narrations measured 2.23 and 1.98 words a
+second, because "bioluminescent" takes longer to say than "cat". So the finished
+narration is measured against the target as well, and a script that missed is
+rewritten using the rate the voice just demonstrated on that material, then
+spoken again. Narration costs a fraction of the images and clips that follow it,
+so paying for it twice is far cheaper than illustrating a video of the wrong
+length.
+
+The first version of this shipped without counting the hook or the padding and
+overran a 30 second target by 26%. The same topic now lands at 28.9 seconds.
 
 Leave the setting at `0` to let a script run to whatever length it wants, which
 is what it did before.

@@ -125,7 +125,7 @@ class ScriptLengthTests(unittest.TestCase):
         # raised above the arithmetic because models write short.
         length = ScriptLength(30.0, 2.0)
 
-        OllamaProvider(_settings(), opener, length=length).generate_script("Space travel")
+        OllamaProvider(_settings(), opener).generate_script("Space travel", None, length)
 
         self.assertIn("Write exactly 5 scenes", prompts[0])
         self.assertIn("about 15 words", prompts[0])
@@ -134,9 +134,9 @@ class ScriptLengthTests(unittest.TestCase):
     def test_a_script_within_tolerance_is_accepted_first_time(self) -> None:
         opener, prompts = self._opener_returning(58)
 
-        result = OllamaProvider(
-            _settings(), opener, length=ScriptLength(30.0, 2.0),
-        ).generate_script("Space travel")
+        result = OllamaProvider(_settings(), opener).generate_script(
+            "Space travel", None, ScriptLength(30.0, 2.0),
+        )
 
         self.assertTrue(result.is_success)
         self.assertEqual(len(prompts), 1, "a script that fits should not be redone")
@@ -146,9 +146,9 @@ class ScriptLengthTests(unittest.TestCase):
         # second attempt lands.
         opener, prompts = self._opener_returning(20, 60)
 
-        result = OllamaProvider(
-            _settings(), opener, length=ScriptLength(30.0, 2.0),
-        ).generate_script("Space travel")
+        result = OllamaProvider(_settings(), opener).generate_script(
+            "Space travel", None, ScriptLength(30.0, 2.0),
+        )
 
         self.assertTrue(result.is_success)
         self.assertEqual(len(prompts), 2)
@@ -157,23 +157,47 @@ class ScriptLengthTests(unittest.TestCase):
     def test_the_closest_attempt_is_kept_when_none_fit(self) -> None:
         # None of these reach the target, so the nearest must survive rather
         # than whichever happened to come last.
-        opener, prompts = self._opener_returning(20, 48, 24)
+        opener, prompts = self._opener_returning(20, 40, 24)
 
-        result = OllamaProvider(
-            _settings(), opener, length=ScriptLength(30.0, 2.0),
-        ).generate_script("Space travel")
+        result = OllamaProvider(_settings(), opener).generate_script(
+            "Space travel", None, ScriptLength(30.0, 2.0),
+        )
 
         self.assertTrue(result.is_success)
         self.assertEqual(len(prompts), 3)
-        self.assertEqual(_spoken_words(result), 48)
+        self.assertEqual(_spoken_words(result), 40)
+
+    def test_the_hook_counts_towards_the_length(self) -> None:
+        # The fixture's hook is seven words, and it is spoken, so a budget that
+        # ignored it would be short by however long it takes to say.
+        opener, prompts = self._opener_returning(53)
+
+        result = OllamaProvider(_settings(), opener).generate_script(
+            "Space travel", None, ScriptLength(30.0, 2.0),
+        )
+
+        # Fifty three narration words plus a seven word hook is sixty words,
+        # which is exactly thirty seconds at two words a second.
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(prompts), 1, "counting the hook should land this on target")
+
+    def test_scene_padding_comes_out_of_the_word_budget(self) -> None:
+        # Half a second of silence after each of five scenes is two and a half
+        # seconds of the target that cannot be spent on words.
+        padded = ScriptLength(30.0, 2.0, 0.5)
+        bare = ScriptLength(30.0, 2.0)
+
+        self.assertEqual(bare.words_for(5), 60)
+        self.assertEqual(padded.words_for(5), 55)
+        self.assertEqual(padded.seconds_for(55, 5), 30.0)
 
     def test_a_transport_failure_while_retrying_is_still_structured(self) -> None:
         def opener(request: object, timeout: float) -> FakeResponse:
             raise URLError("service unavailable")
 
-        result = OllamaProvider(
-            _settings(), opener, length=ScriptLength(30.0, 2.0),
-        ).generate_script("Space travel")
+        result = OllamaProvider(_settings(), opener).generate_script(
+            "Space travel", None, ScriptLength(30.0, 2.0),
+        )
 
         self.assertFalse(result.is_success)
         self.assertEqual(result.error.code, "connection_failed")

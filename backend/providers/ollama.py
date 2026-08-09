@@ -95,25 +95,30 @@ class OllamaProvider:
     """Generate structured scripts through a locally running Ollama server."""
 
     def __init__(
-        self,
-        settings: OllamaSettings,
-        opener: HttpOpener | None = None,
-        length: ScriptLength | None = None,
+        self, settings: OllamaSettings, opener: HttpOpener | None = None,
     ) -> None:
-        """Initialize the provider, optionally aiming at a narration length."""
+        """Initialize the provider with validated Ollama settings."""
         self._settings = settings
         self._opener = opener or urlopen
-        self._length = length
         self._logger = get_logger("providers.ollama")
 
-    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
-        """Generate a structured short-form video script for a topic."""
+    def generate_script(
+        self,
+        topic: str,
+        style: str | None = None,
+        length: ScriptLength | None = None,
+    ) -> ScriptResult:
+        """Generate a structured short-form video script for a topic.
+
+        The length is passed in rather than held, because only the caller that
+        hears the finished narration can say how fast this voice really speaks.
+        """
         started_at = perf_counter()
         normalized_topic = topic.strip()
         if not normalized_topic:
             return self._failure("", started_at, "invalid_topic", "Topic cannot be empty.", False)
         try:
-            script = self._script_of_the_right_length(normalized_topic, style)
+            script = self._script_of_the_right_length(normalized_topic, style, length)
         except HTTPError as error:
             return self._failure(normalized_topic, started_at, "http_error", str(error), True)
         except (URLError, TimeoutError, OSError) as error:
@@ -137,45 +142,43 @@ class OllamaProvider:
         )
 
     def _script_of_the_right_length(
-        self, topic: str, style: str | None,
+        self, topic: str, style: str | None, length: ScriptLength | None,
     ) -> tuple[str, str, str, tuple[Scene, ...]]:
         """Generate a script, retrying while it misses the target length.
 
-        A video runs exactly as long as its narration, so the length is decided
-        here or not at all. How long a script will take to speak is known from
-        its word count alone, which costs nothing, so a miss is caught before
-        any narration, image or clip is generated. The closest of the attempts
-        is kept rather than the last.
+        How long a script will take to speak follows from its word count, which
+        costs nothing to work out, so a miss is caught before any narration,
+        image or clip is generated. The closest of the attempts is kept rather
+        than the last. This is an estimate either way; only hearing it says for
+        certain, which is why the caller checks again afterwards.
         """
-        if self._length is None:
+        if length is None:
             return _parse_script(self._request(_script_prompt(topic, style)))
         best: tuple[str, str, str, tuple[Scene, ...]] | None = None
         best_miss = float("inf")
         for attempt in range(1, SCRIPT_LENGTH_ATTEMPTS + 1):
-            script = _parse_script(
-                self._request(_script_prompt(topic, style, self._length)),
-            )
-            spoken = self._length.seconds_for(_narration_words(script[3]))
-            miss = abs(spoken - self._length.target_seconds) / self._length.target_seconds
+            script = _parse_script(self._request(_script_prompt(topic, style, length)))
+            spoken = length.seconds_for(_spoken_words(script), len(script[3]))
+            miss = abs(spoken - length.target_seconds) / length.target_seconds
             if miss < best_miss:
                 best, best_miss = script, miss
             if miss <= SCRIPT_LENGTH_TOLERANCE:
                 self._logger.info(
-                    "Script speaks for about %.1f seconds against a %.1f second "
-                    "target, on attempt %d.",
-                    spoken, self._length.target_seconds, attempt,
+                    "Script should speak for about %.1f seconds against a %.1f "
+                    "second target, on attempt %d.",
+                    spoken, length.target_seconds, attempt,
                 )
                 return script
             self._logger.info(
-                "Script speaks for about %.1f seconds against a %.1f second "
+                "Script should speak for about %.1f seconds against a %.1f second "
                 "target, %.0f%% out on attempt %d.",
-                spoken, self._length.target_seconds, miss * 100, attempt,
+                spoken, length.target_seconds, miss * 100, attempt,
             )
         assert best is not None
         self._logger.warning(
             "Kept the closest script after %d attempts, still %.0f%% from the "
             "%.1f second target.",
-            SCRIPT_LENGTH_ATTEMPTS, best_miss * 100, self._length.target_seconds,
+            SCRIPT_LENGTH_ATTEMPTS, best_miss * 100, length.target_seconds,
         )
         return best
 
@@ -221,8 +224,15 @@ def _request_payload(model: str, prompt: str) -> dict[str, object]:
     return {"model": model, "prompt": prompt, "stream": False, "format": "json"}
 
 
-def _narration_words(scenes: tuple[Scene, ...]) -> int:
-    return sum(len(scene.narration.split()) for scene in scenes)
+def _spoken_words(script: tuple[str, str, str, tuple[Scene, ...]]) -> int:
+    """Count every word that will be heard, which includes the hook.
+
+    The hook leads the first scene's narration once the workflow has merged it,
+    so a budget that counted only the scenes would be short by however long the
+    hook takes to say.
+    """
+    _, hook, _, scenes = script
+    return len(hook.split()) + sum(len(scene.narration.split()) for scene in scenes)
 
 
 def _length_instruction(length: ScriptLength) -> str:
@@ -236,7 +246,7 @@ def _length_instruction(length: ScriptLength) -> str:
     remains.
     """
     scenes = max(2, round(length.target_seconds / SECONDS_PER_SCENE))
-    per_scene = max(1, round(length.target_words * SCRIPT_LENGTH_CORRECTION / scenes))
+    per_scene = max(1, round(length.words_for(scenes) * SCRIPT_LENGTH_CORRECTION / scenes))
     return (
         f" Write exactly {scenes} scenes. Each scene's narration must be about "
         f"{per_scene} words, one or two spoken sentences, so the whole script "
