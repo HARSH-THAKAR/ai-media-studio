@@ -35,8 +35,6 @@ narrated, subtitled MP4 entirely on local infrastructure.
 
 - [x] ComfyUI API
 
-- [ ] Batch Generation
-
 - [x] Retry Logic
 
 ---
@@ -71,9 +69,33 @@ narrated, subtitled MP4 entirely on local infrastructure.
 
 ## Next
 
-- [ ] Batch Generation
+- [ ] Overlap narration and image generation
 
-  Scenes are queued to ComfyUI one prompt at a time.
+  Image generation reads only each scene's image prompt and order, never its
+  duration, so it does not depend on narration at all. Running the two stages
+  together would take roughly 110 seconds off a 505 second run. Both use the
+  GPU, so the `gpu` section below should be honoured first, to keep the voice
+  model off the card while an image model is resident.
+
+- [ ] Honour the `gpu` configuration section
+
+  `gpu.device` and `gpu.memory_limit_mb` are validated on load and then never
+  read, so setting them changes nothing. Either pass them to the voice and
+  image providers or remove them. The same is true of `assets_dir`, the
+  `cache` section, and `temp.max_age_hours`.
 
 - [ ] Decide where relative `[paths]` values resolve from for an installed
       copy, which currently must use absolute paths
+
+---
+
+## Not planned
+
+- Batch image generation
+
+  ComfyUI runs a single `prompt_worker` thread that takes one queue item at a
+  time, so submitting several scenes at once only fills the queue and leaves
+  the wall clock unchanged. Genuine batching would need one prompt to produce
+  several different images, which the workflow format does not express, or a
+  second ComfyUI instance, which does not fit alongside SDXL on 8 GB of VRAM.
+  Overlapping narration with image generation, above, is the achievable win.
