@@ -81,10 +81,14 @@ checking, then a web dashboard, then scheduled uploading.
   because it reads as one that works. A settings file still carrying them keeps
   loading, since unknown keys are ignored.
 
-  `paths.temp_dir` is the same shape and was left alone. Nothing writes to it
-  either, but it is created on startup, so removing it is a decision about
-  whether the application should have scratch space at all rather than a
-  cleanup.
+  `paths.temp_dir` went with them. It looked like it was at least creating
+  scratch space on startup, but the method that did so, `ensure_runtime_directories`,
+  turned out to have no callers anywhere: every directory is created by whoever
+  needs it, logging its own and `ProjectStore` the project tree. So the setting
+  named a directory that was never created, and the method went too.
+
+  The `assets/` directory is the last of this family. It holds only a
+  placeholder file and no longer has a setting pointing at it.
 
 ---
 

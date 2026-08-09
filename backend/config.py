@@ -23,7 +23,6 @@ class PathSettings:
 
     base_dir: Path
     output_dir: Path
-    temp_dir: Path
     ffmpeg_executable: str
 
 
@@ -148,11 +147,6 @@ class Settings:
     kokoro: KokoroSettings
     video: VideoSettings
 
-    def ensure_runtime_directories(self) -> None:
-        """Create directories used for generated and temporary artifacts."""
-        self.paths.output_dir.mkdir(parents=True, exist_ok=True)
-        self.paths.temp_dir.mkdir(parents=True, exist_ok=True)
-
 
 def load_settings(
     config_path: Path | None = None,
@@ -270,7 +264,6 @@ def _build_paths(values: dict[str, object], base_dir: Path) -> PathSettings:
     return PathSettings(
         base_dir=base_dir,
         output_dir=_resolve_path(values, "output_dir", base_dir),
-        temp_dir=_resolve_path(values, "temp_dir", base_dir),
         ffmpeg_executable=_resolve_executable(values, base_dir),
     )
 

@@ -8,7 +8,6 @@ debug = false
 # own directory otherwise. Absolute paths are always used as given.
 [paths]
 output_dir = "output"
-temp_dir = "temp"
 ffmpeg_executable = "ffmpeg"
 
 [ollama]
