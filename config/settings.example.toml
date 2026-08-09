@@ -46,6 +46,12 @@ transition_duration_seconds = 0.5
 animate_still_scenes = true
 # How far a zoom or pan travels, as a fraction. 0.2 zooms to 1.2x over a scene.
 camera_motion_strength = 0.2
+# Aim the finished video at this many seconds. A video runs exactly as long as
+# its narration, so this is enforced where the narration is written: the script
+# is asked for a matching number of words and asked again, up to three times, if
+# what comes back would speak too long or too short. Leave at 0 to let the script
+# run to whatever length it wants. 30 or under suits discovery on most platforms.
+target_duration_seconds = 0.0
 # How the missing frames are produced when an SVD clip is slowed to fill its
 # scene. A clip holds about twenty five frames, so repeating them leaves each
 # picture on screen for a third of a second, which looks like stuttering rather

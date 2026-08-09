@@ -71,6 +71,7 @@ class VideoSettings:
     animate_still_scenes: bool = True
     camera_motion_strength: float = 0.2
     clip_smoothing: str = "blend"
+    target_duration_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +329,9 @@ def _build_video(values: dict[str, object]) -> VideoSettings:
             values, "camera_motion_strength", 0.2,
         ),
         clip_smoothing=_clip_smoothing(values),
+        target_duration_seconds=_optional_nonnegative_float(
+            values, "target_duration_seconds", 0.0,
+        ),
     )
 
 

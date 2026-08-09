@@ -7,6 +7,7 @@ import unittest
 from urllib.error import URLError
 
 from backend.config import OllamaSettings
+from backend.providers.contracts import ScriptLength
 from backend.providers.ollama import OllamaProvider
 
 
@@ -93,11 +94,104 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(result.error.code, "invalid_response")
 
 
+class ScriptLengthTests(unittest.TestCase):
+    """Verify a configured narration length is asked for and enforced."""
+
+    def _opener_returning(self, *word_counts: int):
+        """Return an opener serving scripts of the given narration lengths."""
+        prompts: list[str] = []
+        remaining = list(word_counts)
+
+        def opener(request: object, timeout: float) -> FakeResponse:
+            body = json.loads(getattr(request, "data").decode("utf-8"))
+            prompts.append(body["prompt"])
+            words = remaining.pop(0) if remaining else word_counts[-1]
+            return FakeResponse({"response": _script_json(narration_words=words)})
+
+        return opener, prompts
+
+    def test_no_target_asks_for_no_particular_length(self) -> None:
+        opener, prompts = self._opener_returning(10)
+
+        result = OllamaProvider(_settings(), opener).generate_script("Space travel")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(prompts), 1)
+        self.assertNotIn("Write exactly", prompts[0])
+
+    def test_a_target_asks_per_scene_rather_than_per_script(self) -> None:
+        opener, prompts = self._opener_returning(60)
+        # Thirty seconds at two words a second: five scenes, and a word budget
+        # raised above the arithmetic because models write short.
+        length = ScriptLength(30.0, 2.0)
+
+        OllamaProvider(_settings(), opener, length=length).generate_script("Space travel")
+
+        self.assertIn("Write exactly 5 scenes", prompts[0])
+        self.assertIn("about 15 words", prompts[0])
+        self.assertIn("about 30 seconds to say aloud", prompts[0])
+
+    def test_a_script_within_tolerance_is_accepted_first_time(self) -> None:
+        opener, prompts = self._opener_returning(58)
+
+        result = OllamaProvider(
+            _settings(), opener, length=ScriptLength(30.0, 2.0),
+        ).generate_script("Space travel")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(prompts), 1, "a script that fits should not be redone")
+
+    def test_a_script_of_the_wrong_length_is_asked_for_again(self) -> None:
+        # Twenty words is ten seconds against a thirty second target, then a
+        # second attempt lands.
+        opener, prompts = self._opener_returning(20, 60)
+
+        result = OllamaProvider(
+            _settings(), opener, length=ScriptLength(30.0, 2.0),
+        ).generate_script("Space travel")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual(_spoken_words(result), 60)
+
+    def test_the_closest_attempt_is_kept_when_none_fit(self) -> None:
+        # None of these reach the target, so the nearest must survive rather
+        # than whichever happened to come last.
+        opener, prompts = self._opener_returning(20, 48, 24)
+
+        result = OllamaProvider(
+            _settings(), opener, length=ScriptLength(30.0, 2.0),
+        ).generate_script("Space travel")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(prompts), 3)
+        self.assertEqual(_spoken_words(result), 48)
+
+    def test_a_transport_failure_while_retrying_is_still_structured(self) -> None:
+        def opener(request: object, timeout: float) -> FakeResponse:
+            raise URLError("service unavailable")
+
+        result = OllamaProvider(
+            _settings(), opener, length=ScriptLength(30.0, 2.0),
+        ).generate_script("Space travel")
+
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.error.code, "connection_failed")
+
+
+def _spoken_words(result) -> int:
+    return sum(len(scene.narration.split()) for scene in result.scenes)
+
+
 def _settings() -> OllamaSettings:
     return OllamaSettings("http://127.0.0.1:11434", "local-llm", 15)
 
 
-def _script_json(transition: str = "fade", camera_motion: str = "zoom_in") -> str:
+def _script_json(
+    transition: str = "fade",
+    camera_motion: str = "zoom_in",
+    narration_words: int = 5,
+) -> str:
     return json.dumps(
         {
             "title": "Space travel",
@@ -106,7 +200,7 @@ def _script_json(transition: str = "fade", camera_motion: str = "zoom_in") -> st
             "scenes": [
                 {
                     "order": 1,
-                    "narration": "Space travel is changing quickly.",
+                    "narration": " ".join(["word"] * narration_words),
                     "image_prompt": "Earth seen from orbit",
                     "duration": 4.0,
                     "transition": transition,

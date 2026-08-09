@@ -317,6 +317,7 @@ story.append(grid(
         ["video.animate_still_scenes", "Move the image even when the storyboard asks for no camera motion", "true"],
         ["video.camera_motion_strength", "How far a zoom or pan travels", "0.2"],
         ["video.render_timeout_seconds", "How long to wait for the render", "300"],
+        ["video.target_duration_seconds", "Aim the finished video at this many seconds. 0 lets the script run to any length", "0"],
         ["video.clip_smoothing", "How the frames a slowed clip lacks are made. Only used with section 9", "blend"],
         ["svd.enabled", "Animate each scene image instead of panning across it", "false"],
         ["svd.frames, svd.fps", "Length of a generated clip, as frames over frames per second", "25 over 6"],
@@ -664,10 +665,25 @@ story.extend(bullets([
     "Each transition begins the moment its scene stops speaking.",
     "Subtitles line up with the speech, because they use the same measurements.",
 ]))
+story.append(Paragraph("Aiming at a length", H2))
+story.append(para(
+    "Because the video runs exactly as long as the narration, a length can only be "
+    "decided when the script is written. Set "
+    "<font face='Courier'>video.target_duration_seconds</font> and the script writer "
+    "is asked for a matching number of words, phrased per scene, which a language "
+    "model follows far better than a total for the whole script."
+))
+story.append(para(
+    "Asking is not enough on its own, so the result is checked. How long a script "
+    "takes to speak is known from its word count, which costs nothing to work out, "
+    "so a script that would run too long or too short is thrown away and asked for "
+    "again, up to three times, keeping the closest attempt. Nothing is narrated or "
+    "illustrated until the length fits, so a miss costs one model call rather than a "
+    "whole run."
+))
 story.append(note(
-    "A consequence worth knowing: <b>you cannot set the video length directly.</b> It is "
-    "whatever the narration takes. To get a shorter video, ask for a shorter script "
-    "or raise <font face='Courier'>kokoro.speed</font>."
+    "Leave it at <b>0</b>, the default, and a script runs to whatever length it wants. "
+    "Thirty seconds or under suits discovery on most platforms."
 ))
 
 # ---------------------------------------------------------------- 11

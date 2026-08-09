@@ -21,6 +21,11 @@ from backend.providers.contracts import (
 PipelineFactory = Callable[[str, str | None], Any]
 AudioWriter = Callable[[str, list[float], int], None]
 
+# How fast this voice speaks at speed 1.0, measured over a finished narration:
+# 75 words in 33.65 seconds. Aiming a script at a length needs a rate to turn
+# seconds into words, and the voice is the only thing that knows it.
+WORDS_PER_SECOND = 2.23
+
 
 class KokoroProvider:
     """Generate one local narration artifact from a canonical storyboard."""
