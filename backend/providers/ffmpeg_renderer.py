@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import wave
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
@@ -19,6 +20,12 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 # Applied in turn to scenes that ask for no camera motion, so a sequence of
 # them does not repeat the same movement.
 STILL_SCENE_MOTIONS = ("zoom_in", "pan_right", "zoom_out", "pan_left")
+
+# How far the narration and the scene timeline may drift apart before a render
+# is refused. A scene shorter than the minimum is stretched to reach it, so a
+# little slack is expected and only a real mismatch should fail.
+NARRATION_DRIFT_SECONDS = 2.0
+NARRATION_DRIFT_FRACTION = 0.1
 
 
 class FfmpegRenderer:
@@ -112,8 +119,49 @@ def _render_inputs(
         raise ValueError("Workflow result must contain successful narration audio.")
     if not voice_result.artifact_path.is_file():
         raise ValueError("Narration artifact does not exist.")
+    scenes = workflow_result.storyboard.scenes
+    _assert_narration_covers_scenes(voice_result.artifact_path, scenes)
     images = _ordered_images(workflow_result)
-    return images, voice_result.artifact_path, workflow_result.storyboard.scenes
+    return images, voice_result.artifact_path, scenes
+
+
+def _assert_narration_covers_scenes(
+    narration: Path, scenes: tuple[Scene, ...],
+) -> None:
+    """Refuse to render when the narration and the timeline disagree.
+
+    Scene durations are reconciled from the narration, so the two normally
+    match. When they do not, rendering silently pads the difference with
+    silence or trims speech away, and nothing reveals it until somebody
+    watches the whole video.
+    """
+    spoken = _narration_seconds(narration)
+    if spoken is None:
+        return
+    timeline = sum(scene.duration for scene in scenes)
+    allowed = max(NARRATION_DRIFT_SECONDS, timeline * NARRATION_DRIFT_FRACTION)
+    if abs(timeline - spoken) <= allowed:
+        return
+    raise ValueError(
+        f"Narration runs {spoken:.2f} seconds but the scenes span "
+        f"{timeline:.2f} seconds. Rendering would leave the difference silent "
+        "or cut the narration short. Scene durations come from the narration, "
+        "so regenerate both together rather than one alone."
+    )
+
+
+def _narration_seconds(narration: Path) -> float | None:
+    """Return the narration's real length, or nothing if it cannot be read.
+
+    Only the header is inspected. An artifact this cannot parse is left to
+    FFmpeg to accept or reject, rather than failing the render here.
+    """
+    try:
+        with wave.open(str(narration), "rb") as audio:
+            frame_rate = audio.getframerate()
+            return audio.getnframes() / frame_rate if frame_rate else None
+    except (wave.Error, OSError, EOFError):
+        return None
 
 
 def _ordered_images(workflow_result: WorkflowResult) -> tuple[Path, ...]:
