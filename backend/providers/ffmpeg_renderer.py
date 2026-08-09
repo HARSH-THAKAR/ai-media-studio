@@ -16,6 +16,10 @@ from backend.workflow.models import WorkflowResult
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
+# Applied in turn to scenes that ask for no camera motion, so a sequence of
+# them does not repeat the same movement.
+STILL_SCENE_MOTIONS = ("zoom_in", "pan_right", "zoom_out", "pan_left")
+
 
 class FfmpegRenderer:
     """Assemble workflow images and narration into one deterministic MP4."""
@@ -296,7 +300,7 @@ def _scene_filter(
     exactly. ``settb=AVTB`` normalizes every scene onto the microsecond
     timebase that ``xfade`` emits, keeping chained transitions configurable.
     """
-    motion = _motion_filter(scene, settings)
+    motion = _motion_filter(index, scene, settings)
     return (
         f"[{index}:v]scale={settings.width}:{settings.height}:"
         "force_original_aspect_ratio=increase,"
@@ -305,21 +309,35 @@ def _scene_filter(
     )
 
 
-def _motion_filter(scene: Scene, settings: VideoSettings) -> str:
+def _motion_filter(index: int, scene: Scene, settings: VideoSettings) -> str:
+    """Build the movement applied to one scene's image.
+
+    A still image reads as a frozen frame beside narration, so a scene that
+    asks for no motion is given one anyway unless that is switched off. The
+    substitutes alternate, so consecutive still scenes do not all drift the
+    same way.
+    """
+    motion = scene.camera_motion
+    if motion == "none" and settings.animate_still_scenes:
+        motion = STILL_SCENE_MOTIONS[index % len(STILL_SCENE_MOTIONS)]
     frames = max(1, round(scene.duration * settings.frames_per_second))
-    if scene.camera_motion == "none":
+    strength = settings.camera_motion_strength
+    limit = round(1.0 + strength, 4)
+    if motion == "none":
         return f",fps={settings.frames_per_second}"
-    if scene.camera_motion == "zoom_in":
-        zoom = f"min(1+on*0.15/{frames},1.15)"
+    if motion == "zoom_in":
+        zoom = f"min(1+on*{strength}/{frames},{limit})"
         return _zoompan_filter(zoom, "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)", settings)
-    if scene.camera_motion == "zoom_out":
-        zoom = f"max(1.15-on*0.15/{frames},1.0)"
+    if motion == "zoom_out":
+        zoom = f"max({limit}-on*{strength}/{frames},1.0)"
         return _zoompan_filter(zoom, "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)", settings)
-    if scene.camera_motion in {"pan", "pan_right"}:
-        return _zoompan_filter("1.1", f"(iw-iw/zoom)*on/{frames}", "ih/2-(ih/zoom/2)", settings)
-    if scene.camera_motion == "pan_left":
-        return _zoompan_filter("1.1", f"(iw-iw/zoom)*(1-on/{frames})", "ih/2-(ih/zoom/2)", settings)
-    raise ValueError(f"Unsupported scene camera motion: {scene.camera_motion}")
+    if motion in {"pan", "pan_right"}:
+        return _zoompan_filter(str(limit), f"(iw-iw/zoom)*on/{frames}", "ih/2-(ih/zoom/2)", settings)
+    if motion == "pan_left":
+        return _zoompan_filter(
+            str(limit), f"(iw-iw/zoom)*(1-on/{frames})", "ih/2-(ih/zoom/2)", settings,
+        )
+    raise ValueError(f"Unsupported scene camera motion: {motion}")
 
 
 def _zoompan_filter(zoom: str, x: str, y: str, settings: VideoSettings) -> str:

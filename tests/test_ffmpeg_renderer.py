@@ -132,8 +132,61 @@ class FfmpegRendererTests(unittest.TestCase):
 
         command = " ".join(commands[0])
         self.assertTrue(result.is_success)
-        self.assertIn("zoompan=z='min(1+on*0.15/90,1.15)'", command)
+        self.assertIn("zoompan=z='min(1+on*0.2/90,1.2)'", command)
         self.assertIn("transition=wipeleft:duration=0.5", command)
+
+    def test_gives_still_scenes_alternating_motion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            scenes = (
+                Scene(1, "First.", "first", 3.0, "cut"),
+                Scene(2, "Second.", "second", 3.0, "cut"),
+                Scene(3, "Third.", "third", 3.0, "cut"),
+            )
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), _video_settings(), _music_settings(root), runner,
+            )
+            result = renderer.render(_workflow_result(root, scenes))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        # Every scene asked for no motion, so each is given one, and
+        # consecutive scenes do not repeat the same movement.
+        self.assertEqual(command.count("zoompan"), 3)
+        self.assertIn("min(1+on*0.2/90,1.2)", command)
+        self.assertIn("(iw-iw/zoom)*on/90", command)
+        self.assertIn("max(1.2-on*0.2/90,1.0)", command)
+
+    def test_leaves_still_scenes_alone_when_switched_off(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "ffmpeg.exe"
+            executable.write_bytes(b"executable")
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"mp4")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            settings = VideoSettings(1080, 1920, 30, 300, 0.5, animate_still_scenes=False)
+            renderer = FfmpegRenderer(
+                _paths(root, str(executable)), settings, _music_settings(root), runner,
+            )
+            result = renderer.render(_workflow_result(root))
+
+        command = " ".join(commands[0])
+        self.assertTrue(result.is_success)
+        self.assertNotIn("zoompan", command)
 
 
     def test_timeline_matches_narration_despite_transition_overlap(self) -> None:

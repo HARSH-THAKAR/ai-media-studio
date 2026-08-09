@@ -70,6 +70,8 @@ class VideoSettings:
     frames_per_second: int
     render_timeout_seconds: int
     transition_duration_seconds: float
+    animate_still_scenes: bool = True
+    camera_motion_strength: float = 0.2
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +323,10 @@ def _build_video(values: dict[str, object]) -> VideoSettings:
         ),
         transition_duration_seconds=_optional_positive_float(
             values, "transition_duration_seconds", 0.5,
+        ),
+        animate_still_scenes=_optional_bool(values, "animate_still_scenes", True),
+        camera_motion_strength=_optional_positive_float(
+            values, "camera_motion_strength", 0.2,
         ),
     )
 

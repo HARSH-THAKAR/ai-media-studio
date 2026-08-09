@@ -41,6 +41,13 @@ height = 1920
 frames_per_second = 30
 render_timeout_seconds = 300
 transition_duration_seconds = 0.5
+# A still image reads as a frozen frame beside narration, and language models
+# usually ask for no camera motion. Scenes that ask for none are given one
+# anyway, alternating so consecutive scenes do not drift the same way. Set
+# false to honour the storyboard exactly.
+animate_still_scenes = true
+# How far a zoom or pan travels, as a fraction. 0.2 zooms to 1.2x over a scene.
+camera_motion_strength = 0.2
 
 [logging]
 level = "INFO"
