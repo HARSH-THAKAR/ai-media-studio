@@ -68,23 +68,18 @@ Frontend (Future)
 
 ## Folder Structure
 
+```
 AI-Media-Studio/
-
-backend/
-
-services/
-
-workflow/
-
-assets/
-
-output/
-
-temp/
-
-config/
-
-docs/
+  backend/
+    providers/     one module per local model or tool, behind a shared contract
+    workflow/      orchestration, project persistence, and canonical records
+  config/          settings and the ComfyUI workflows the providers run
+  assets/          empty, and nothing reads it yet
+  music/           background tracks you supply
+  tests/           standard library only, no local model is contacted
+  tools/           the user manual generator
+  output/          one directory per run, created on first use
+```
 
 ---
 

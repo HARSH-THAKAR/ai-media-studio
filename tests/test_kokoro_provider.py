@@ -115,7 +115,7 @@ def _settings(root: Path, padding: float = 0.0) -> KokoroSettings:
 
 
 def _paths(root: Path) -> PathSettings:
-    return PathSettings(root, root, root, "ffmpeg")
+    return PathSettings(root, root, "ffmpeg")
 
 
 def _storyboard(scenes: int = 1) -> ScriptResult:
