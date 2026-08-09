@@ -1,6 +1,17 @@
 # Local machine configuration
 config/settings.toml
 
+# Credentials, which must never reach a public repository
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+secrets.toml
+credentials.json
+service-account*.json
+
 # Generated artifacts
 output/
 temp/
