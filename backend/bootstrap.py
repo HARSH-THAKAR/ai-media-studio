@@ -45,22 +45,23 @@ def build_container(settings: Settings) -> ServiceContainer[object]:
 
 
 def _build_ollama_provider(settings: Settings) -> LLMProvider:
-    return OllamaProvider(settings.ollama, length=_script_length(settings))
+    return OllamaProvider(settings.ollama)
 
 
 def _script_length(settings: Settings) -> ScriptLength | None:
     """Describe the narration length to aim for, when one is configured.
 
-    The script writer decides the length of the finished video, because the
-    video runs exactly as long as the narration. Turning a target in seconds
-    into a number of words needs the speaking rate, which belongs to the voice
-    and moves with its configured speed.
+    The video runs exactly as long as its narration, so a target length is
+    really a target word count. Converting between the two needs the speaking
+    rate, which belongs to the voice and moves with its configured speed, and
+    the silence left after each scene, which is part of the finished length.
     """
     if settings.video.target_duration_seconds <= 0:
         return None
     return ScriptLength(
         settings.video.target_duration_seconds,
         WORDS_PER_SECOND * settings.kokoro.speed,
+        settings.kokoro.scene_tail_padding_seconds,
     )
 
 
@@ -109,4 +110,5 @@ def _build_reel_workflow(container: ServiceContainer[object]) -> ReelWorkflow:
         clip_provider=(
             container.get(VideoClipProvider) if settings.svd.enabled else None
         ),
+        script_length=_script_length(settings),
     )

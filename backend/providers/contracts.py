@@ -144,15 +144,20 @@ class ScriptLength:
 
     target_seconds: float
     words_per_second: float
+    padding_seconds_per_scene: float = 0.0
 
-    @property
-    def target_words(self) -> int:
-        """Return how many spoken words fill the target."""
-        return max(1, round(self.target_seconds * self.words_per_second))
+    def words_for(self, scenes: int) -> int:
+        """Return how many spoken words fit the target across this many scenes.
 
-    def seconds_for(self, words: int) -> float:
-        """Return how long a script of this many words takes to speak."""
-        return words / self.words_per_second
+        The silence left after each scene is part of the finished length, so it
+        comes out of the budget rather than being added on top of it.
+        """
+        speech = self.target_seconds - self.padding_seconds_per_scene * scenes
+        return max(1, round(speech * self.words_per_second))
+
+    def seconds_for(self, words: int, scenes: int) -> float:
+        """Return how long this many words across this many scenes will run."""
+        return words / self.words_per_second + self.padding_seconds_per_scene * scenes
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +263,12 @@ class VideoRenderRequest:
 class LLMProvider(Protocol):
     """Provider contract for topic-to-script generation."""
 
-    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
+    def generate_script(
+        self,
+        topic: str,
+        style: str | None = None,
+        length: ScriptLength | None = None,
+    ) -> ScriptResult:
         """Generate a structured script for a topic."""
 
 

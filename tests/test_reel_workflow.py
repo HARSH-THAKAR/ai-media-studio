@@ -12,6 +12,7 @@ from backend.providers.contracts import (
     ImageResult,
     ProviderError,
     Scene,
+    ScriptLength,
     ScriptResult,
     VoiceResult,
     WordTiming,
@@ -22,7 +23,12 @@ from backend.workflow.reel_workflow import ReelWorkflow
 class FakeLlmProvider:
     """Return a fixed canonical storyboard for workflow tests."""
 
-    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
+    def generate_script(
+        self,
+        topic: str,
+        style: str | None = None,
+        length: ScriptLength | None = None,
+    ) -> ScriptResult:
         """Generate a two-scene test storyboard."""
         del style
         scenes = (
@@ -86,7 +92,12 @@ class FakeImageProvider:
 class _UnusableLlmProvider:
     """Fail if a resumed run asks for a storyboard it already has."""
 
-    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
+    def generate_script(
+        self,
+        topic: str,
+        style: str | None = None,
+        length: ScriptLength | None = None,
+    ) -> ScriptResult:
         """Raise because the persisted storyboard should be reused."""
         raise AssertionError("Resume regenerated the storyboard.")
 
@@ -140,7 +151,12 @@ class _HookLlmProvider:
         self._hook = hook
         self._opening = opening
 
-    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
+    def generate_script(
+        self,
+        topic: str,
+        style: str | None = None,
+        length: ScriptLength | None = None,
+    ) -> ScriptResult:
         """Generate a two-scene storyboard around the configured hook."""
         del style
         scenes = (
@@ -148,6 +164,122 @@ class _HookLlmProvider:
             Scene(2, "Second scene.", "second image", 2.0, "cut"),
         )
         return ScriptResult(topic, "Title", self._hook, "CTA", scenes, "test", "test", 0.1)
+
+
+class _MeasuringVoiceProvider:
+    """Speak at a fixed rate so a narration length can be predicted in a test."""
+
+    def __init__(self, words_per_second: float) -> None:
+        """Configure how fast this voice says the words it is given."""
+        self._rate = words_per_second
+        self.spoken: list[float] = []
+
+    def generate_voice(
+        self,
+        storyboard: ScriptResult,
+        output_path: Path | None = None,
+        voice: str | None = None,
+    ) -> VoiceResult:
+        """Return a narration as long as the words actually take to say."""
+        del voice
+        assert output_path is not None
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"audio")
+        per_scene = [
+            len(scene.narration.split()) / self._rate for scene in storyboard.scenes
+        ]
+        total = sum(per_scene)
+        self.spoken.append(total)
+        return VoiceResult(
+            output_path, total, 0.1, "test", None, 24_000,
+            scene_durations=tuple(per_scene),
+        )
+
+
+class _WordCountLlmProvider:
+    """Return a script of whatever length the caller's budget asks for."""
+
+    def __init__(self, words_per_scene_returned: list[int]) -> None:
+        """Queue the narration length of each successive script."""
+        self._queued = list(words_per_scene_returned)
+        self.lengths: list[ScriptLength | None] = []
+
+    def generate_script(
+        self,
+        topic: str,
+        style: str | None = None,
+        length: ScriptLength | None = None,
+    ) -> ScriptResult:
+        """Record the budget asked for and return the next queued script."""
+        del style
+        self.lengths.append(length)
+        words = self._queued.pop(0) if self._queued else 1
+        scenes = (
+            Scene(1, " ".join(["word"] * words), "first", 2.0, "fade"),
+            Scene(2, " ".join(["word"] * words), "second", 2.0, "cut"),
+        )
+        return ScriptResult(topic, "Title", "", "CTA", scenes, "test", "test", 0.1)
+
+
+class NarrationLengthTests(unittest.TestCase):
+    """Verify the narration is measured against the target, not just predicted."""
+
+    def test_narration_within_the_target_is_accepted(self) -> None:
+        llm = _WordCountLlmProvider([30])
+        voice = _MeasuringVoiceProvider(2.0)
+        with tempfile.TemporaryDirectory() as directory:
+            result = ReelWorkflow(
+                llm, voice, FakeImageProvider(), Path(directory),
+                script_length=ScriptLength(30.0, 2.0),
+            ).generate("Why Japan Never Sleeps")
+
+        # Sixty words at two a second is exactly the target.
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(llm.lengths), 1, "a narration that fits is not redone")
+        self.assertEqual(voice.spoken, [30.0])
+
+    def test_narration_that_overruns_is_rewritten_and_respoken(self) -> None:
+        # The voice is half the assumed speed, so the first script runs twice
+        # as long as predicted and has to be written again.
+        llm = _WordCountLlmProvider([30, 15])
+        voice = _MeasuringVoiceProvider(1.0)
+        with tempfile.TemporaryDirectory() as directory:
+            result = ReelWorkflow(
+                llm, voice, FakeImageProvider(), Path(directory),
+                script_length=ScriptLength(30.0, 2.0),
+            ).generate("Why Japan Never Sleeps")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(llm.lengths), 2)
+        self.assertEqual(voice.spoken, [60.0, 30.0])
+        # The rewrite is asked for at the rate the first narration demonstrated,
+        # not the one that was assumed and turned out to be wrong.
+        self.assertAlmostEqual(llm.lengths[1].words_per_second, 1.0)
+
+    def test_a_stubborn_length_is_accepted_with_a_warning(self) -> None:
+        llm = _WordCountLlmProvider([30, 30])
+        voice = _MeasuringVoiceProvider(1.0)
+        with tempfile.TemporaryDirectory() as directory:
+            result = ReelWorkflow(
+                llm, voice, FakeImageProvider(), Path(directory),
+                script_length=ScriptLength(30.0, 2.0),
+            ).generate("Why Japan Never Sleeps")
+
+        # Rather than loop forever, the run continues on the second attempt.
+        self.assertTrue(result.is_success)
+        self.assertEqual(len(llm.lengths), 2)
+
+    def test_no_target_never_measures_or_rewrites(self) -> None:
+        llm = _WordCountLlmProvider([200])
+        voice = _MeasuringVoiceProvider(1.0)
+        with tempfile.TemporaryDirectory() as directory:
+            result = ReelWorkflow(
+                llm, voice, FakeImageProvider(), Path(directory),
+            ).generate("Why Japan Never Sleeps")
+
+        self.assertTrue(result.is_success)
+        self.assertEqual(llm.lengths, [None])
+        self.assertEqual(len(voice.spoken), 1)
 
 
 class SpokenHookTests(unittest.TestCase):
