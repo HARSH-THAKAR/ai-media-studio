@@ -132,6 +132,95 @@ class FakeClipProvider:
         return ClipResult(scene.order, output_path, "test", 0.1, 1, clip_seconds=4.0)
 
 
+class _HookLlmProvider:
+    """Return a storyboard with a configurable hook and opening line."""
+
+    def __init__(self, hook: str, opening: str = "First scene.") -> None:
+        """Configure the hook and the first scene's own narration."""
+        self._hook = hook
+        self._opening = opening
+
+    def generate_script(self, topic: str, style: str | None = None) -> ScriptResult:
+        """Generate a two-scene storyboard around the configured hook."""
+        del style
+        scenes = (
+            Scene(1, self._opening, "first image", 2.0, "fade"),
+            Scene(2, "Second scene.", "second image", 2.0, "cut"),
+        )
+        return ScriptResult(topic, "Title", self._hook, "CTA", scenes, "test", "test", 0.1)
+
+
+class SpokenHookTests(unittest.TestCase):
+    """Verify the storyboard's hook reaches the narration."""
+
+    def _generate(self, provider: _HookLlmProvider, directory: str):
+        return ReelWorkflow(
+            provider, FakeVoiceProvider(), FakeImageProvider(), Path(directory),
+        ).generate("Why Japan Never Sleeps")
+
+    def test_the_hook_opens_the_first_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._generate(_HookLlmProvider("Nobody tells you this"), directory)
+
+        # Nothing spoke the hook before, so the most important line of the
+        # script never reached the video at all.
+        self.assertEqual(
+            result.storyboard.scenes[0].narration,
+            "Nobody tells you this. First scene.",
+        )
+        self.assertEqual(result.storyboard.scenes[1].narration, "Second scene.")
+        # The hook is kept as written, so the record still shows where it came from.
+        self.assertEqual(result.storyboard.hook, "Nobody tells you this")
+
+    def test_hook_punctuation_is_left_alone_when_it_has_some(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._generate(_HookLlmProvider("Ever wondered why?"), directory)
+
+        self.assertEqual(
+            result.storyboard.scenes[0].narration, "Ever wondered why? First scene.",
+        )
+
+    def test_a_hook_the_model_already_spoke_is_not_repeated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._generate(
+                _HookLlmProvider("Japan never sleeps.", "Japan never sleeps. Here is why."),
+                directory,
+            )
+
+        self.assertEqual(
+            result.storyboard.scenes[0].narration, "Japan never sleeps. Here is why.",
+        )
+
+    def test_an_empty_hook_changes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._generate(_HookLlmProvider("   "), directory)
+
+        self.assertEqual(result.storyboard.scenes[0].narration, "First scene.")
+
+    def test_resume_does_not_speak_the_hook_twice(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            first = ReelWorkflow(
+                _HookLlmProvider("Nobody tells you this"),
+                FakeVoiceProvider((3.0, 4.0)),
+                FakeImageProvider(2),
+                output_dir,
+            ).generate("Why Japan Never Sleeps")
+
+            resumed = ReelWorkflow(
+                _UnusableLlmProvider(), _UnusableVoiceProvider(),
+                FakeImageProvider(), output_dir,
+            ).resume(first.project_path)
+
+        # The persisted storyboard already opens with the hook, so resuming
+        # must read it back rather than prepend it a second time.
+        self.assertTrue(resumed.is_success)
+        self.assertEqual(
+            resumed.storyboard.scenes[0].narration,
+            "Nobody tells you this. First scene.",
+        )
+
+
 class ReelWorkflowClipTests(unittest.TestCase):
     """Verify scene images are animated when a clip provider is configured."""
 
