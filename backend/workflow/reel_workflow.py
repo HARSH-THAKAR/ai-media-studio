@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
@@ -61,12 +60,11 @@ class ReelWorkflow:
         storyboard = self._generate_storyboard(request, started_at, project, style)
         if isinstance(storyboard, WorkflowResult):
             return storyboard
-        voice_result, image_results = self._narration_with_images(
-            request, started_at, project, storyboard, voice,
-        )
+        voice_result = self._generate_voice(request, started_at, project, storyboard, voice)
         if isinstance(voice_result, WorkflowResult):
             return voice_result
         storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
+        image_results = self._generate_images(project, storyboard)
         return self._finish_images(
             request, project, started_at, storyboard, voice_result, image_results,
         )
@@ -90,44 +88,18 @@ class ReelWorkflow:
         self._logger.info("Resuming reel workflow for topic '%s'.", request.topic)
         existing = _existing_narration(project, storyboard)
         if existing is None:
-            voice_result, image_results = self._narration_with_images(
-                request, started_at, project, storyboard, voice,
-            )
-            if isinstance(voice_result, WorkflowResult):
-                return voice_result
+            generated = self._generate_voice(request, started_at, project, storyboard, voice)
+            if isinstance(generated, WorkflowResult):
+                return generated
+            voice_result = generated
             storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
         else:
             self._logger.info("Reusing existing narration.")
             voice_result = existing
-            image_results = self._generate_images(project, storyboard)
+        image_results = self._generate_images(project, storyboard)
         return self._finish_images(
             request, project, started_at, storyboard, voice_result, image_results,
         )
-
-    def _narration_with_images(
-        self,
-        request: WorkflowRequest,
-        started_at: float,
-        project: ProjectPaths,
-        storyboard: ScriptResult,
-        voice: str | None,
-    ) -> tuple[VoiceResult | WorkflowResult, tuple[ImageResult, ...]]:
-        """Generate narration and scene images at the same time.
-
-        Image generation reads only each scene's prompt and order, never its
-        duration, so it does not depend on narration. Running the two together
-        overlaps the slowest stages of a run, including the model each one
-        loads before its first result.
-
-        Both stages always run to completion. If narration fails the images are
-        still written to the project directory, where a resumed run reuses them.
-        """
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="narration") as pool:
-            narration = pool.submit(
-                self._generate_voice, request, started_at, project, storyboard, voice,
-            )
-            image_results = self._generate_images(project, storyboard)
-            return narration.result(), image_results
 
     def _finish_images(
         self,
