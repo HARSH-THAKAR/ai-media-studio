@@ -216,6 +216,30 @@ synthesized, controlled by `video.clip_smoothing`:
 | `motion` | about a minute | Movement between frames is followed, which is sharper when the clip has a clearly moving subject. Raise `video.render_timeout_seconds` to use it. |
 | `none` | none | Frames are repeated, which stutters. |
 
+## Aiming at a length
+
+A video runs exactly as long as its narration, so length is decided when the
+script is written or not at all. Set `video.target_duration_seconds` and the
+script writer is asked for a matching number of words.
+
+Asking is not enough on its own. Measured on `llama3.1:8b`, a word budget for the
+whole script missed by a median of 36% and wandered between 66% short and 30%
+long. The same budget expressed per scene missed by a median of 18% but missed
+*consistently*, which is a bias rather than noise, so the budget asked for is
+raised to cancel it.
+
+What remains is caught rather than trusted. How long a script takes to speak is
+known from its word count alone, which costs nothing, so a script that would run
+too long or too short is thrown away and asked for again, up to three times,
+keeping the closest attempt. Nothing is narrated or illustrated until the length
+fits, so a miss costs one language model call rather than a run.
+
+Across ten live generations at 30 and 45 second targets, every script that
+parsed came in within 15% of its target.
+
+Leave the setting at `0` to let a script run to whatever length it wants, which
+is what it did before.
+
 ## The opening line
 
 A storyboard names a `hook` for the opening seconds. It now leads the first
