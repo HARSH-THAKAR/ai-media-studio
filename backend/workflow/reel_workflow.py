@@ -64,7 +64,10 @@ class ReelWorkflow:
         if isinstance(voice_result, WorkflowResult):
             return voice_result
         storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
-        return self._generate_remaining(request, project, started_at, storyboard, voice_result)
+        image_results = self._generate_images(project, storyboard)
+        return self._finish_images(
+            request, project, started_at, storyboard, voice_result, image_results,
+        )
 
     def resume(self, project_dir: Path, voice: str | None = None) -> WorkflowResult:
         """Continue a persisted project from its first incomplete stage.
@@ -83,8 +86,8 @@ class ReelWorkflow:
             )
         request = WorkflowRequest(storyboard.topic, project.project_dir.name)
         self._logger.info("Resuming reel workflow for topic '%s'.", request.topic)
-        voice_result = _existing_narration(project, storyboard)
-        if voice_result is None:
+        existing = _existing_narration(project, storyboard)
+        if existing is None:
             generated = self._generate_voice(request, started_at, project, storyboard, voice)
             if isinstance(generated, WorkflowResult):
                 return generated
@@ -92,18 +95,27 @@ class ReelWorkflow:
             storyboard = self._reconcile_scene_durations(project, storyboard, voice_result)
         else:
             self._logger.info("Reusing existing narration.")
-        return self._generate_remaining(request, project, started_at, storyboard, voice_result)
+            voice_result = existing
+        image_results = self._generate_images(project, storyboard)
+        return self._finish_images(
+            request, project, started_at, storyboard, voice_result, image_results,
+        )
 
-    def _generate_remaining(
+    def _finish_images(
         self,
         request: WorkflowRequest,
         project: ProjectPaths,
         started_at: float,
         storyboard: ScriptResult,
         voice_result: VoiceResult,
+        image_results: tuple[ImageResult, ...],
     ) -> WorkflowResult:
         assets = [GeneratedAsset("narration", voice_result.artifact_path)]
-        image_results = self._generate_images(request, project, storyboard, assets)
+        assets.extend(
+            GeneratedAsset("image", result.artifact_path, result.scene_order)
+            for result in image_results
+            if result.artifact_path is not None
+        )
         failure = next((item for item in image_results if not item.is_success), None)
         if failure is not None:
             return self._finish(
@@ -202,11 +214,7 @@ class ReelWorkflow:
         return reconciled
 
     def _generate_images(
-        self,
-        request: WorkflowRequest,
-        project: ProjectPaths,
-        storyboard: ScriptResult,
-        assets: list[GeneratedAsset],
+        self, project: ProjectPaths, storyboard: ScriptResult,
     ) -> tuple[ImageResult, ...]:
         results: list[ImageResult] = []
         for scene in storyboard.scenes:
@@ -214,7 +222,6 @@ class ReelWorkflow:
             if _is_present(image_path):
                 self._logger.info("Reusing existing image for scene %d.", scene.order)
                 results.append(ImageResult(scene.order, image_path, "reused", 0.0, 0))
-                assets.append(GeneratedAsset("image", image_path, scene.order))
                 continue
             self._logger.info("Generating image for scene %d.", scene.order)
             try:
@@ -226,8 +233,6 @@ class ReelWorkflow:
                     ProviderError("provider_exception", str(error), False),
                 )
             results.append(result)
-            if result.artifact_path is not None:
-                assets.append(GeneratedAsset("image", result.artifact_path, scene.order))
             if not result.is_success:
                 break
         return tuple(results)
