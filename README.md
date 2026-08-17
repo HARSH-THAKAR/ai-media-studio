@@ -17,7 +17,7 @@ Version 0.1.0. The pipeline works end to end and produces finished videos.
   subtitles, background music, transitions and camera motion, rendering, and
   resuming an interrupted run.
 - Not started: automatic research and fact checking, a web dashboard, and
-  scheduled uploading. See [ROADMAP.md](ROADMAP.md).
+  scheduled uploading. See [ROADMAP.md](docs/ROADMAP.md).
 
 New here? [USER_MANUAL.pdf](USER_MANUAL.pdf) covers installation, configuration,
 and troubleshooting. It is generated from [tools/make_manual.py](tools/make_manual.py),
@@ -269,7 +269,7 @@ a fact, question or claim rather than describing the view. Across five topics on
 
 It is guidance, not a guarantee. The model still occasionally overstates, and
 nothing checks a hook's claim against reality; automatic fact checking is Phase 3
-in [ROADMAP.md](ROADMAP.md). Read the opening line before publishing.
+in [ROADMAP.md](docs/ROADMAP.md). Read the opening line before publishing.
 
 ## Subtitles
 
