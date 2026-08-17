@@ -19,9 +19,10 @@ Version 0.1.0. The pipeline works end to end and produces finished videos.
 - Not started: automatic research and fact checking, a web dashboard, and
   scheduled uploading. See [ROADMAP.md](docs/ROADMAP.md).
 
-New here? [USER_MANUAL.pdf](USER_MANUAL.pdf) covers installation, configuration,
-and troubleshooting. It is generated from [tools/make_manual.py](tools/make_manual.py),
-so regenerate it there rather than editing the PDF.
+New here? [docs/USER_MANUAL.md](docs/USER_MANUAL.md) covers installation,
+configuration, and troubleshooting. It is generated from
+[tools/make_manual.py](tools/make_manual.py), so regenerate it there rather than
+editing the markdown.
 
 ## Goals
 
