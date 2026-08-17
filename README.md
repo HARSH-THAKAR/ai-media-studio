@@ -4,302 +4,114 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 
-AI Media Studio is a fully local AI-powered content creation platform that automatically generates short-form videos for platforms like Instagram Reels, YouTube Shorts, and TikTok.
+Give it a topic, get a finished vertical MP4: scripted, narrated, illustrated
+scene by scene, subtitled and rendered, entirely on your own machine.
 
-One topic in, one finished 1080x1920 MP4 out: researched and scripted, narrated,
-illustrated scene by scene, subtitled, and rendered. Nothing leaves the machine.
+## Demo
 
-## Status
+<!-- TODO(demo): drop the preview GIF and MP4 in here.
+     Replace this comment with:
+       [![demo](assets/demo/<name>.gif)](assets/demo/<name>.mp4)
+     and link the full-quality MP4 underneath. -->
+
+## Install
+
+Needs [Ollama](https://ollama.com), [ComfyUI](https://github.com/comfyanonymous/ComfyUI),
+and FFmpeg running locally. Kokoro installs as a Python dependency.
+
+```bash
+pip install -e .
+copy config\settings.example.toml config\settings.toml
+```
+
+Set `ollama.model` and `kokoro.voice` in `config/settings.toml`, then:
+
+```bash
+ai-media-studio generate --topic "Why Japan Never Sleeps" --music --subtitle
+```
+
+One timestamped project directory appears under `output/`, with the finished
+video in `video/final.mp4`. A run that stops partway through can be continued
+with `--resume` instead of starting over.
+
+Full setup, every setting, and troubleshooting: [docs/USER_MANUAL.md](docs/USER_MANUAL.md).
+
+## What works, and what doesn't
 
 Version 0.1.0. The pipeline works end to end and produces finished videos.
 
-- Working: script and scene planning, narration, per-scene image generation,
-  subtitles, background music, transitions and camera motion, rendering, and
-  resuming an interrupted run.
-- Not started: automatic research and fact checking, a web dashboard, and
-  scheduled uploading. See [ROADMAP.md](docs/ROADMAP.md).
+**Works:** script and scene planning, narration, per-scene image generation,
+word-by-word subtitles, background music, transitions and camera motion,
+animating scenes with Stable Video Diffusion, aiming at a target length, and
+resuming an interrupted run.
 
-New here? [docs/USER_MANUAL.md](docs/USER_MANUAL.md) covers installation,
-configuration, and troubleshooting. It is generated from
-[tools/make_manual.py](tools/make_manual.py), so regenerate it there rather than
-editing the markdown.
+**Not started:** automatic research and fact checking, a web dashboard, and
+scheduled uploading. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Goals
+**Worth knowing before you publish anything:** nothing checks a script's claims
+against reality. The opening line is written to be striking, and a language
+model asked for a striking claim will sometimes overstate one. Read it first.
 
-- Fully local execution
-- No paid APIs
-- Modular architecture
-- Easy model swapping
-- Production-ready code
+## How it hits a target length
 
----
-
-## Features
-
-- Local LLM (Ollama)
-- Local Image Generation (ComfyUI)
-- Local Voice Generation (Kokoro)
-- Local Video Rendering (FFmpeg)
-- Automatic Prompt Engineering
-- Scene Planning
-- Subtitle Generation
-- Background Music
-- Auto Upload (Future)
-
----
-
-## Technology Stack
-
-Backend
-- Python 3.12
-
-AI
-- Ollama
-- ComfyUI
-- Kokoro TTS
-
-Video
-- FFmpeg
-
-Frontend (Future)
-- React
-- Electron
-
----
-
-## Folder Structure
-
-```
-AI-Media-Studio/
-  backend/
-    providers/     one module per local model or tool, behind a shared contract
-    workflow/      orchestration, project persistence, and canonical records
-  config/          settings and the ComfyUI workflows the providers run
-  assets/          empty, and nothing reads it yet
-  music/           background tracks you supply
-  tests/           standard library only, no local model is contacted
-  tools/           the user manual generator
-  output/          one directory per run, created on first use
-```
-
----
-
-## Running
-
-Install the project into your Python 3.12 environment, then use the command
-line interface as the primary v1.0 user interface:
-
-```powershell
-pip install -e .
-ai-media-studio generate --topic "Why Japan Never Sleeps"
-```
-
-Optional generation controls are available without editing source code:
-
-```powershell
-ai-media-studio generate `
-  --topic "Why Japan Never Sleeps" `
-  --output "D:\\Media Projects" `
-  --style "cinematic documentary" `
-  --voice "af_heart" `
-  --music `
-  --subtitle
-```
-
-The command displays stage progress, total generation time, provider versions,
-and the final MP4 path. It creates one timestamped project directory beneath
-the configured output directory (or the directory passed to `--output`).
-
-## Resuming an interrupted run
-
-Every stage writes to the project directory, so a run interrupted after the
-storyboard can continue instead of starting over:
-
-```powershell
-ai-media-studio generate --resume "output\20260808T164700953894Z_why-japan-never-sleeps" --subtitle
-```
-
-The storyboard is read back from disk, existing narration and scene images are
-reused, and only missing artifacts are generated. Resuming a complete project
-regenerates nothing and simply re-renders. Pass either `--topic` or `--resume`,
-not both.
-
-## Selecting a configuration file
-
-By default the application reads `config/settings.toml` from the project
-directory. Point it somewhere else with either the `--config` option or the
-`AI_MEDIA_CONFIG` environment variable, in that order of precedence:
-
-```powershell
-ai-media-studio generate --topic "Why Japan Never Sleeps" --config "D:\studio\settings.toml"
-$env:AI_MEDIA_CONFIG = "D:\studio\settings.toml"
-```
-
-This is what an installed (non-editable) copy needs, since it has no project
-directory of its own.
-
-Relative paths resolve against the project directory when you use the project's
-own `config/settings.toml`, and against the settings file's own directory
-otherwise. So an installed copy only needs a folder containing a settings file:
-
-```
-D:\studio\
-  settings.toml       relative paths below resolve against D:\studio
-  config\
-    comfyui_workflow.json
-  music\
-  output\             created here
-```
-
-No absolute paths required.
-
-## Tests
-
-The suite uses only the standard library and never contacts a local model:
-
-```powershell
-python -m unittest discover -s tests -t .
-```
-
-## ComfyUI workflow setup
-
-Configure only `comfyui.workflow_path`. The image provider discovers the
-positive prompt node from a sampler's `positive` graph connection and discovers
-the single `SaveImage` output node automatically. Workflows with ambiguous or
-missing candidates return a structured configuration error.
-
-## Project output
-
-Every workflow execution creates a timestamp-and-slug project directory under
-`output/`. It contains the canonical `manifest.json`, `storyboard.json`,
-`narration.wav`, the `word_timings.json` captions are built from, generated
-`images/` and `clips/`, and `video/` and `logs/` directories.
-
-## Background music
-
-Place supported local audio files (`.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, or
-`.ogg`) in the configured `music.directory`. `BackgroundMusicProvider` selects
-one track at random. Pass its successful result to `VideoRenderer` to loop,
-fade, and duck the track beneath narration.
-
-## Animating scenes with Stable Video Diffusion
-
-By default each scene is a still image with a slow pan or zoom over it. Set
-`svd.enabled = true` to animate the picture itself, so people move, rain falls,
-and lights flicker.
-
-This needs an SVD checkpoint in ComfyUI's `models/checkpoints` folder, named by
-`config/svd_workflow.json`:
-
-```powershell
-huggingface-cli download stabilityai/stable-video-diffusion-img2vid-xt svd_xt.safetensors --local-dir comfyui\models\checkpoints
-```
-
-Each scene is generated twice: once as a still image, then again as a clip
-animating that image. Expect one to three minutes per scene on an 8 GB card, so
-a six-scene run takes roughly half an hour rather than eight minutes. Clips are
-saved under `clips/` in the project directory and reused when a run is resumed,
-because they are by far the most expensive artifact to produce.
-
-A clip runs `svd.frames / svd.fps` seconds, about four by default, while a scene
-lasts as long as its narration. Clips are therefore slowed to fill their scene.
-Camera motion is not applied to a scene that has a clip, since the picture
-already moves. A scene whose animation fails falls back to its still image.
-
-Slowing a clip that far spreads its twenty five frames very thinly: a ten second
-scene would hold each picture for four tenths of a second, which the eye reads as
-stuttering rather than slow motion. The frames in between are therefore
-synthesized, controlled by `video.clip_smoothing`:
-
-| Mode | Cost per scene | Result |
-| --- | --- | --- |
-| `blend` (default) | a few seconds | Each frame fades into the next. |
-| `motion` | about a minute | Movement between frames is followed, which is sharper when the clip has a clearly moving subject. Raise `video.render_timeout_seconds` to use it. |
-| `none` | none | Frames are repeated, which stutters. |
-
-## Aiming at a length
-
-A video runs exactly as long as its narration, so length is decided when the
+A video runs exactly as long as its narration, so the length is decided when the
 script is written or not at all. Set `video.target_duration_seconds` and the
 script writer is asked for a matching number of words.
 
-Asking is not enough on its own. Measured on `llama3.1:8b`, a word budget for the
-whole script missed by a median of 36% and wandered between 66% short and 30%
-long. The same budget expressed per scene missed by a median of 18% but missed
-*consistently*, which is a bias rather than noise, so the budget asked for is
-raised to cancel it.
+Asking is not enough on its own, and the measurements are the interesting part.
+On `llama3.1:8b`, a word budget for the whole script missed by a median of
+**36%**, wandering between 66% short and 30% long. The same budget expressed
+**per scene** missed by a median of **18%** — and missed *consistently*, every
+result landing short rather than scattering. A consistent bias can be cancelled;
+noise cannot. So the budget asked for is raised to cancel it.
 
-What remains is caught rather than trusted, twice.
+What remains is checked rather than trusted, twice:
 
-A script's spoken length is estimated from its word count, which costs nothing,
-so one that would run too long or too short is asked for again, up to three
-times, keeping the closest attempt. The estimate counts the hook, because the
-hook is spoken too, and subtracts the silence left after each scene, because that
-is part of the finished length.
+- A script's spoken length is estimated from its word count, which costs nothing,
+  so one that would run too long or too short is asked for again before anything
+  expensive happens. A miss costs one model call, not a run.
+- The estimate rests on a words-per-second figure that moves with the writing —
+  two real narrations measured **2.23** and **1.98** words a second, because
+  "bioluminescent" takes longer to say than "cat". So the finished narration is
+  measured too, and a script that missed is rewritten at the rate the voice just
+  demonstrated.
 
-The estimate is still an estimate. It rests on a words-per-second figure that
-moves with the writing: two real narrations measured 2.23 and 1.98 words a
-second, because "bioluminescent" takes longer to say than "cat". So the finished
-narration is measured against the target as well, and a script that missed is
-rewritten using the rate the voice just demonstrated on that material, then
-spoken again. Narration costs a fraction of the images and clips that follow it,
-so paying for it twice is far cheaper than illustrating a video of the wrong
-length.
+The first version of this shipped without counting the spoken hook or the pauses
+between scenes, and overran a 30 second target by 26%. The same topic now lands
+at **28.9 seconds**.
 
-The first version of this shipped without counting the hook or the padding and
-overran a 30 second target by 26%. The same topic now lands at 28.9 seconds.
-
-Leave the setting at `0` to let a script run to whatever length it wants, which
-is what it did before.
+Leave the setting at `0` and a script runs to whatever length it wants.
 
 ## The opening line
 
-A storyboard names a `hook` for the opening seconds. It now leads the first
-scene's narration, so it is spoken and captioned like any other line rather than
-being recorded and discarded. Short-form video is decided in its first seconds,
-which made that the most expensive line in the script to be throwing away.
+A storyboard names a `hook` for the opening seconds, and for a while nothing
+spoke it — it was generated, written to disk, and thrown away. It now leads the
+first scene's narration.
 
-The merge happens once, before the storyboard is written to disk, so a resumed
-run reads back narration that already opens with the hook. A hook the model
-already spoke as its first line is left alone rather than repeated.
+Asking for a "hook" alone gets you atmospheric scene-setting, so the prompt says
+what a hook is for: one sentence, at most twelve words, stating a fact, question
+or claim rather than describing the view. Across five topics that moved the
+median hook from **fifteen words to eight**.
 
-A model asked only for a "hook" returns atmospheric scene-setting, so the script
-prompt now says what the hook is for: one sentence, at most twelve words, stating
-a fact, question or claim rather than describing the view. Across five topics on
-`llama3.1:8b` that moved the median hook from fifteen words to eight.
+## Configuration
 
-It is guidance, not a guarantee. The model still occasionally overstates, and
-nothing checks a hook's claim against reality; automatic fact checking is Phase 3
-in [ROADMAP.md](docs/ROADMAP.md). Read the opening line before publishing.
+Every setting, the ComfyUI workflow contract, Stable Video Diffusion, clip
+smoothing, subtitle internals and camera motion are documented in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## Subtitles
+## Tests
 
-Captions follow the narration word by word rather than showing a whole scene's
-text at once. The voice provider reports when each word is spoken, measured
-while the speech is synthesized, and those timings drive the cues. Sentences are
-divided into cues of roughly equal length, controlled by
-`subtitles.max_characters_per_cue`, and each cue stays on screen until the next
-begins so captions never blink out mid-sentence.
+Standard library only, and no local model is contacted:
 
-Only the voice provider that spoke the script can measure this, and a resumed
-run reuses narration rather than speaking it again, so the timings are written
-to `word_timings.json` and read back. Resuming keeps captions word by word.
-
-A voice provider that reports no word timings falls back to one cue per scene,
-as does a project generated before those timings were recorded.
-
-## Scene motion and transitions
-
-Each scene can set `camera_motion` to `none`, `zoom_in`, `zoom_out`, `pan`,
-`pan_left`, or `pan_right`. Scene transitions are selected from scene metadata;
-the default transition overlap is controlled by `video.transition_duration_seconds`.
-
-Language models overwhelmingly choose `none`, which leaves every image frozen
-on screen. Scenes asking for no motion are therefore given one anyway,
-alternating between zoom and pan so consecutive scenes differ. Set
-`video.animate_still_scenes = false` to honour the storyboard exactly, and
-`video.camera_motion_strength` to control how far a movement travels.
+```bash
+python -m unittest discover -s tests -t .
+```
 
 ## License
 
 Released under the MIT License. See [LICENSE](LICENSE).
+
+The models and tools this drives carry their own licences — notably Stable Video
+Diffusion, which is free for commercial use only below a revenue threshold set by
+Stability AI, and Llama, which carries its own community licence and acceptable
+use policy. Check them before publishing commercially.
