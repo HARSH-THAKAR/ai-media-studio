@@ -9,10 +9,23 @@ scene by scene, subtitled and rendered, entirely on your own machine.
 
 ## Demo
 
-<!-- TODO(demo): drop the preview GIF and MP4 in here.
-     Replace this comment with:
-       [![demo](assets/demo/<name>.gif)](assets/demo/<name>.mp4)
-     and link the full-quality MP4 underneath. -->
+Three runs, one command each, nothing hand-edited. Every one asked for a
+30 second video:
+
+[![A generated reel about neutron stars](assets/demo/neutron-stars.gif)](assets/demo/neutron-stars.mp4)
+
+| Topic | Asked | Got |
+| --- | --- | --- |
+| [Why Neutron Stars Spin So Fast](assets/demo/neutron-stars.mp4) | 30s | **29.3s** |
+| [Why Venice Is Sinking](assets/demo/venice.mp4) | 30s | **31.3s** |
+| [How Bees Decide Where To Live](assets/demo/bees.mp4) | 30s | **33.5s** |
+
+The preview above is a six second loop; click through for the full video. See
+[How it hits a target length](#how-it-hits-a-target-length) for why those
+numbers land where they do.
+
+<!-- TODO(demo): swap in a different hero clip here if you would rather lead
+     with another topic — replace the GIF and MP4 links above. -->
 
 ## Install
 

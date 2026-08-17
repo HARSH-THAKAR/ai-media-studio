@@ -41,5 +41,8 @@ AI-Media-Studio/
 # Local media assets
 assets/*
 !assets/.gitkeep
+# Demo material shown in the README is committed, unlike local scratch assets.
+!assets/demo/
+!assets/demo/**
 music/*
 !music/.gitkeep

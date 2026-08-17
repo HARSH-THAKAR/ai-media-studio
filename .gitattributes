@@ -9,4 +9,6 @@
 *.wav binary
 *.mp3 binary
 *.mp4 binary
+*.webm binary
+*.gif binary
 *.ico binary
