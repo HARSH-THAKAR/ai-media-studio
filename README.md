@@ -9,8 +9,7 @@ scene by scene, subtitled and rendered, entirely on your own machine.
 
 ## Demo
 
-Three runs, one command each, nothing hand-edited. Every one asked for a
-30 second video:
+Three runs, one command each, nothing hand-edited:
 
 [![A generated reel about neutron stars](assets/demo/neutron-stars.gif)](assets/demo/neutron-stars.mp4)
 
@@ -19,6 +18,11 @@ Three runs, one command each, nothing hand-edited. Every one asked for a
 | [Why Neutron Stars Spin So Fast](assets/demo/neutron-stars.mp4) | 30s | **29.3s** |
 | [Why Venice Is Sinking](assets/demo/venice.mp4) | 30s | **31.3s** |
 | [How Bees Decide Where To Live](assets/demo/bees.mp4) | 30s | **33.5s** |
+
+These asked for 30 seconds because that suits discovery on most platforms, not
+because it is a limit. `video.target_duration_seconds` takes any length, and the
+scene count scales with it; leave it at `0`, the default, and the script runs to
+whatever length it wants. Only 30 seconds is demonstrated here.
 
 The preview above is a six second loop; click through for the full video. See
 [How it hits a target length](#how-it-hits-a-target-length) for why those
