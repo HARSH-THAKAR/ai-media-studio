@@ -83,7 +83,16 @@ images are scaled and cropped to fit, so a landscape image loses its edges.
 
 ## Animating scenes with Stable Video Diffusion
 
-<!-- TODO(demo): still-with-camera-motion vs animated comparison goes here. -->
+The same topic, generated twice. On the left each scene is a still image with a
+slow pan or zoom across it; on the right the picture itself moves.
+
+| Still, with camera motion | Animated with SVD |
+| --- | --- |
+| [![still](../assets/demo/neutron-stars.gif)](../assets/demo/neutron-stars.mp4) | [![animated](../assets/demo/neutron-stars-svd.gif)](../assets/demo/neutron-stars-svd.mp4) |
+| 29.3s, generated in 3m 39s | 30.9s, generated in 23m 28s |
+
+Both were asked for 30 seconds. The difference in cost is entirely the clips:
+five scenes at 224 to 260 seconds each.
 
 By default each scene is a still image with a slow pan or zoom over it. Set
 `svd.enabled = true` to animate the picture itself, so people move, rain falls,
