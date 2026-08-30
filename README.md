@@ -28,9 +28,6 @@ The preview above is a six second loop; click through for the full video. See
 [How it hits a target length](#how-it-hits-a-target-length) for why those
 numbers land where they do.
 
-<!-- TODO(demo): swap in a different hero clip here if you would rather lead
-     with another topic — replace the GIF and MP4 links above. -->
-
 ## Install
 
 Needs [Ollama](https://ollama.com), [ComfyUI](https://github.com/comfyanonymous/ComfyUI),
