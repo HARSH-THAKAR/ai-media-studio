@@ -41,7 +41,7 @@ copy config\settings.example.toml config\settings.toml
 Set `ollama.model` and `kokoro.voice` in `config/settings.toml`, then:
 
 ```bash
-ai-media-studio generate --topic "Why Japan Never Sleeps" --music --subtitle
+ai-media-studio generate --topic "Why Japan Never Sleeps" --subtitle
 ```
 
 One timestamped project directory appears under `output/`, with the finished
