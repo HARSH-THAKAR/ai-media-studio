@@ -94,6 +94,9 @@ The first version of this shipped without counting the spoken hook or the pauses
 between scenes, and ran to **37.85 seconds** against a 30 second target, 26% over.
 The same topic now lands at **28.9 seconds**.
 
+The measurements behind all of this, and the three causes of that overrun, are
+written up in [docs/LENGTH_CONTROL.md](docs/LENGTH_CONTROL.md).
+
 Leave the setting at `0` and a script runs to whatever length it wants.
 
 ## The opening line
