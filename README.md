@@ -91,8 +91,8 @@ What remains is checked rather than trusted, twice:
   demonstrated.
 
 The first version of this shipped without counting the spoken hook or the pauses
-between scenes, and overran a 30 second target by 26%. The same topic now lands
-at **28.9 seconds**.
+between scenes, and ran to **37.85 seconds** against a 30 second target, 26% over.
+The same topic now lands at **28.9 seconds**.
 
 Leave the setting at `0` and a script runs to whatever length it wants.
 
